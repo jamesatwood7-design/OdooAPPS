@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Time Clock - Summary{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 mx-auto">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-bar-chart"></i> Hours Summary</h2>
+            <a href="{{ url_for('timeclock.dashboard') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+
+        {% if employee %}
+        <p class="text-muted">Employee: <strong>{{ employee.name }}</strong></p>
+        {% endif %}
+
+        <!-- Date Navigation -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="GET" class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label for="date" class="form-label">Select Date</label>
+                        <input type="date" name="date" id="date" class="form-control"
+                               value="{{ target_date.isoformat() }}">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-calendar"></i> View
+                        </button>
+                    </div>
+                    <div class="col-md-5 text-end">
+                        <a href="{{ url_for('timeclock.summary') }}" class="btn btn-outline-secondary">
+                            Today
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Daily Summary -->
+            {% if daily %}
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="bi bi-calendar-day"></i> Daily Summary - {{ daily.date.strftime('%A, %B %d, %Y') }}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-3">
+                            <h2>{{ daily.total_hours_fmt }}</h2>
+                            <p class="text-muted">Total Hours</p>
+                        </div>
+
+                        {% if daily.records %}
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Clock In</th>
+                                    <th>Clock Out</th>
+                                    <th>Hours</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for rec in daily.records %}
+                                <tr>
+                                    <td>{{ rec.check_in_dt.strftime('%I:%M %p') if rec.check_in_dt else '-' }}</td>
+                                    <td>
+                                        {% if rec.check_out_dt %}
+                                            {{ rec.check_out_dt.strftime('%I:%M %p') }}
+                                        {% else %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ rec.worked_hours_fmt }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="text-muted text-center">No records for this day.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Weekly Summary -->
+            {% if weekly %}
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">
+                            <i class="bi bi-calendar-week"></i> Weekly Summary
+                            <small>{{ weekly.week_start.strftime('%b %d') }} - {{ weekly.week_end.strftime('%b %d, %Y') }}</small>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-3">
+                            <h2>{{ weekly.total_hours_fmt }}</h2>
+                            <p class="text-muted">Total Hours This Week</p>
+                        </div>
+
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Day</th>
+                                    <th>Date</th>
+                                    <th>Hours</th>
+                                    <th>Bar</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for day in weekly.days %}
+                                <tr {% if day.date == target_date %}class="table-active"{% endif %}>
+                                    <td>{{ day.name[:3] }}</td>
+                                    <td>{{ day.date.strftime('%m/%d') }}</td>
+                                    <td>{{ day.hours_fmt }}</td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            {% set pct = (day.hours / 10 * 100) if day.hours > 0 else 0 %}
+                                            <div class="progress-bar bg-success" style="width: {{ pct|min(100) }}%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot class="table-dark">
+                                <tr>
+                                    <td colspan="2"><strong>Total</strong></td>
+                                    <td><strong>{{ weekly.total_hours_fmt }}</strong></td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

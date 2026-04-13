@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Time Clock - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <h2 class="mb-4"><i class="bi bi-clock"></i> Time Clock</h2>
+
+        <!-- Employee Selector -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('timeclock.select_employee') }}" class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label for="employee_id" class="form-label fw-bold">Select Employee</label>
+                        <select name="employee_id" id="employee_id" class="form-select">
+                            <option value="">-- Choose Employee --</option>
+                            {% for emp in employees %}
+                                <option value="{{ emp.id }}"
+                                    {% if emp.id == selected_employee_id %}selected{% endif %}>
+                                    {{ emp.name }}
+                                    {% if emp.attendance_state == 'checked_in' %}
+                                        (Clocked In)
+                                    {% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-outline-primary w-100">
+                            <i class="bi bi-person-check"></i> Select
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if status %}
+        <!-- Attendance Status -->
+        <div class="card mb-4 {% if status.state == 'checked_in' %}border-success{% else %}border-secondary{% endif %}">
+            <div class="card-body text-center p-5">
+                <h4 class="text-muted mb-2">{{ status.employee.name }}</h4>
+
+                {% if status.state == 'checked_in' %}
+                    <div class="status-badge bg-success text-white rounded-pill d-inline-block px-4 py-2 mb-3">
+                        <i class="bi bi-check-circle-fill"></i> CLOCKED IN
+                    </div>
+                    {% if status.since %}
+                        <p class="text-muted mb-1">Since {{ status.since.strftime('%I:%M %p') }}</p>
+                        <h3 class="elapsed-time" id="elapsedTime"
+                            data-since="{{ status.since.isoformat() }}">
+                            Calculating...
+                        </h3>
+                    {% endif %}
+                {% else %}
+                    <div class="status-badge bg-secondary text-white rounded-pill d-inline-block px-4 py-2 mb-3">
+                        <i class="bi bi-x-circle-fill"></i> CLOCKED OUT
+                    </div>
+                {% endif %}
+
+                <div class="mt-4">
+                    <form method="POST" action="{{ url_for('timeclock.toggle_attendance') }}">
+                        {% if status.state == 'checked_in' %}
+                            <button type="submit" class="btn btn-danger btn-lg px-5"
+                                    id="toggleBtn">
+                                <i class="bi bi-stop-circle"></i> Clock Out
+                            </button>
+                        {% else %}
+                            <button type="submit" class="btn btn-success btn-lg px-5"
+                                    id="toggleBtn">
+                                <i class="bi bi-play-circle"></i> Clock In
+                            </button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Today's Quick Stats -->
+        {% if today_summary %}
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Today's Hours</h6>
+                        <h3>{{ today_summary.total_hours_fmt }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Entries Today</h6>
+                        <h3>{{ today_summary.record_count }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Quick Links</h6>
+                        <a href="{{ url_for('timeclock.history') }}" class="btn btn-sm btn-outline-primary me-1">History</a>
+                        <a href="{{ url_for('timeclock.summary') }}" class="btn btn-sm btn-outline-primary">Summary</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% elif selected_employee_id %}
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i> Could not load employee data. Please try again.
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> Please select an employee above to start using the time clock.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/timeclock.js') }}"></script>
+{% endblock %}

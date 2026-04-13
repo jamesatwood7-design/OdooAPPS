@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Report - {{ report.project.name }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-graph-up"></i> Job Cost Report</h2>
+        <h4 class="text-muted">{{ report.project.name }}</h4>
+    </div>
+    <div>
+        <a href="{{ url_for('jobcosting.project_detail', project_id=report.project.id) }}"
+           class="btn btn-outline-primary me-2">
+            <i class="bi bi-eye"></i> Project Details
+        </a>
+        <a href="{{ url_for('jobcosting.report_list') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back
+        </a>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card text-center border-primary">
+            <div class="card-body">
+                <h6 class="text-muted">Budgeted</h6>
+                <h3 class="text-primary">{{ report.totals.budgeted_hours_fmt }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-info">
+            <div class="card-body">
+                <h6 class="text-muted">Actual</h6>
+                <h3 class="text-info">{{ report.totals.actual_hours_fmt }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center {% if report.totals.variance_sign == 'under' %}border-success{% else %}border-danger{% endif %}">
+            <div class="card-body">
+                <h6 class="text-muted">Variance</h6>
+                <h3 class="{% if report.totals.variance_sign == 'under' %}text-success{% else %}text-danger{% endif %}">
+                    {% if report.totals.variance_sign == 'over' %}-{% endif %}{{ report.totals.variance_hours_fmt }}
+                    <small>({{ '%.1f'|format(report.totals.variance_pct) }}%)</small>
+                </h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <h6 class="text-muted">Total Cost</h6>
+                <h3 class="text-warning">${{ '%.2f'|format(report.totals.total_cost) }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Budget vs Actual by Task</h5>
+    </div>
+    <div class="card-body">
+        <canvas id="budgetChart" height="100"></canvas>
+    </div>
+</div>
+
+<!-- Task Breakdown Table -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Task Breakdown</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Task</th>
+                        <th class="text-end">Budgeted Hours</th>
+                        <th class="text-end">Actual Hours</th>
+                        <th class="text-end">Variance</th>
+                        <th class="text-end">Cost</th>
+                        <th class="text-end">Entries</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.task_rows %}
+                    <tr>
+                        <td>{{ row.name }}</td>
+                        <td class="text-end">{{ row.budgeted_hours_fmt }}</td>
+                        <td class="text-end">{{ row.actual_hours_fmt }}</td>
+                        <td class="text-end">
+                            <span class="{% if row.variance_sign == 'under' %}text-success{% else %}text-danger{% endif %}">
+                                {% if row.variance_sign == 'over' %}-{% endif %}{{ row.variance_hours_fmt }}
+                            </span>
+                        </td>
+                        <td class="text-end">${{ '%.2f'|format(row.actual_cost) }}</td>
+                        <td class="text-end">{{ row.entry_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="table-dark">
+                    <tr>
+                        <td><strong>TOTAL</strong></td>
+                        <td class="text-end"><strong>{{ report.totals.budgeted_hours_fmt }}</strong></td>
+                        <td class="text-end"><strong>{{ report.totals.actual_hours_fmt }}</strong></td>
+                        <td class="text-end">
+                            <strong class="{% if report.totals.variance_sign == 'under' %}text-success{% else %}text-danger{% endif %}">
+                                {% if report.totals.variance_sign == 'over' %}-{% endif %}{{ report.totals.variance_hours_fmt }}
+                            </strong>
+                        </td>
+                        <td class="text-end"><strong>${{ '%.2f'|format(report.totals.total_cost) }}</strong></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var ctx = document.getElementById('budgetChart').getContext('2d');
+
+    var taskNames = {{ report.task_rows | map(attribute='name') | list | tojson }};
+    var budgetedData = {{ report.task_rows | map(attribute='budgeted_hours') | list | tojson }};
+    var actualData = {{ report.task_rows | map(attribute='actual_hours') | list | tojson }};
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: taskNames,
+            datasets: [
+                {
+                    label: 'Budgeted Hours',
+                    data: budgetedData,
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Actual Hours',
+                    data: actualData,
+                    backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Hours' }
+                }
+            },
+            plugins: {
+                legend: { position: 'top' }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

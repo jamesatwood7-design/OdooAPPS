@@ -1,0 +1,86 @@
+/* Status Badge */
+.status-badge {
+    font-size: 1.2rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* Elapsed Time Display */
+.elapsed-time {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #198754;
+}
+
+/* App Card Hover Effect */
+.app-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.app-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* Project Card Hover */
+.project-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
+}
+
+/* Table Improvements */
+.table th {
+    white-space: nowrap;
+}
+
+/* Progress bar in weekly summary */
+.progress {
+    background-color: #e9ecef;
+    border-radius: 4px;
+}
+
+/* Form styling */
+.form-label {
+    font-weight: 500;
+}
+
+/* Nav active indicator */
+.navbar-nav .nav-link.active {
+    font-weight: 600;
+    border-bottom: 2px solid #fff;
+}
+
+/* Card header consistency */
+.card-header h5 {
+    font-weight: 600;
+}
+
+/* Report variance colors */
+.text-success {
+    font-weight: 600;
+}
+
+.text-danger {
+    font-weight: 600;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .elapsed-time {
+        font-size: 1.8rem;
+    }
+
+    .status-badge {
+        font-size: 1rem;
+    }
+
+    .btn-lg {
+        font-size: 1rem;
+        padding: 0.5rem 1.5rem;
+    }
+}

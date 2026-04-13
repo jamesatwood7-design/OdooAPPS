@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Home - Odoo Apps{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-8">
+        <h1 class="text-center mb-4">Odoo Applications</h1>
+        <p class="text-center text-muted mb-5">
+            Manage employee attendance and track project costs through Odoo.
+        </p>
+
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="card h-100 shadow-sm app-card">
+                    <div class="card-body text-center p-4">
+                        <i class="bi bi-clock display-1 text-primary mb-3"></i>
+                        <h3 class="card-title">Time Clock</h3>
+                        <p class="card-text text-muted">
+                            Clock in and out, view attendance history,
+                            and track daily and weekly hours.
+                        </p>
+                        <a href="{{ url_for('timeclock.dashboard') }}" class="btn btn-primary btn-lg mt-2">
+                            <i class="bi bi-arrow-right-circle"></i> Open Time Clock
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card h-100 shadow-sm app-card">
+                    <div class="card-body text-center p-4">
+                        <i class="bi bi-calculator display-1 text-success mb-3"></i>
+                        <h3 class="card-title">Job Costing</h3>
+                        <p class="card-text text-muted">
+                            Track project costs, manage analytic items,
+                            and generate budget vs. actual reports.
+                        </p>
+                        <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-success btn-lg mt-2">
+                            <i class="bi bi-arrow-right-circle"></i> Open Job Costing
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Create Entry - Job Costing{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-plus-circle"></i> Create Entry</h2>
+            <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <!-- Entry Type Tabs -->
+                <ul class="nav nav-tabs mb-4" id="entryTypeTabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-bs-toggle="tab" href="#timeEntry"
+                           onclick="document.getElementById('entry_type').value='time'">
+                            <i class="bi bi-clock"></i> Time Entry
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="tab" href="#expenseEntry"
+                           onclick="document.getElementById('entry_type').value='expense'">
+                            <i class="bi bi-cash"></i> Expense Entry
+                        </a>
+                    </li>
+                </ul>
+
+                <form method="POST" id="entryForm">
+                    <input type="hidden" name="entry_type" id="entry_type" value="time">
+
+                    <!-- Common Fields -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="project_id" class="form-label">Project</label>
+                            <select name="project_id" id="project_id" class="form-select"
+                                    onchange="onProjectChange(this.value)">
+                                <option value="">-- Select Project --</option>
+                                {% for proj in projects %}
+                                    <option value="{{ proj.id }}">{{ proj.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="account_id" class="form-label">Analytic Account <span class="text-danger">*</span></label>
+                            <select name="account_id" id="account_id" class="form-select" required>
+                                <option value="">-- Select Account --</option>
+                                {% for acct in accounts %}
+                                    <option value="{{ acct.id }}">
+                                        {% if acct.code %}[{{ acct.code }}] {% endif %}{{ acct.name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="entry_date" class="form-label">Date <span class="text-danger">*</span></label>
+                            <input type="date" name="entry_date" id="entry_date" class="form-control"
+                                   value="{{ today.isoformat() }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="description" class="form-label">Description <span class="text-danger">*</span></label>
+                            <input type="text" name="description" id="description" class="form-control"
+                                   placeholder="What did you work on?" required>
+                        </div>
+                    </div>
+
+                    <!-- Time Entry Fields -->
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="timeEntry">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label for="task_id" class="form-label">Task</label>
+                                    <select name="task_id" id="task_id" class="form-select">
+                                        <option value="">-- Select Task --</option>
+                                    </select>
+                                    <small class="text-muted">Select a project first</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="employee_id" class="form-label">Employee</label>
+                                    <select name="employee_id" id="employee_id" class="form-select">
+                                        <option value="">-- Select Employee --</option>
+                                        {% for emp in employees %}
+                                            <option value="{{ emp.id }}">{{ emp.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="hours" class="form-label">Hours</label>
+                                    <input type="number" name="hours" id="hours" class="form-control"
+                                           step="0.25" min="0.25" placeholder="e.g. 2.5">
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label for="hourly_rate" class="form-label">Hourly Rate ($)</label>
+                                    <input type="number" name="hourly_rate" id="hourly_rate" class="form-control"
+                                           step="0.01" min="0" placeholder="e.g. 75.00" value="0">
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label">Estimated Cost</label>
+                                    <div class="form-control-plaintext">
+                                        <span id="estimatedCost">$0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Expense Entry Fields -->
+                        <div class="tab-pane fade" id="expenseEntry">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="amount" class="form-label">Amount ($)</label>
+                                    <input type="number" name="amount" id="amount" class="form-control"
+                                           step="0.01" min="0.01" placeholder="e.g. 150.00">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <div class="d-flex justify-content-end">
+                        <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-outline-secondary me-2">Cancel</a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Create Entry
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/jobcosting.js') }}"></script>
+{% endblock %}
