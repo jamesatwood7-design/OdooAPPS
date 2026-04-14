@@ -84,6 +84,11 @@
     user-select: none;
 }
 
+#colSelectorWrap {
+    position: relative;
+    z-index: 1050;
+}
+
 .job-table th.sortable:hover {
     background-color: #495057;
     cursor: pointer;
