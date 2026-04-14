@@ -1,7 +1,7 @@
 from common.utils import date_to_odoo, odoo_to_date, format_duration, format_many2one
 from jobcosting.field_mapping import (
     resolve_dashboard_columns, resolve_detail_sections, format_odoo_value,
-    resolve_status_field,
+    resolve_status_field, get_custom_field_map, resolve_field,
 )
 
 
@@ -415,6 +415,212 @@ def get_job_dashboard_data(odoo):
     }
 
 
+def get_sales_orders(odoo, account_id):
+    """Get Sales Orders linked to an analytic account.
+
+    Searches sale.order.line for analytic_distribution containing
+    the account ID, then fetches parent sale.order records.
+    """
+    try:
+        # Find SO lines with this analytic account
+        so_lines = odoo.search_read(
+            'sale.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['order_id', 'analytic_distribution'],
+            limit=500,
+        )
+
+        # Filter for exact match and collect unique order IDs
+        order_ids = set()
+        for line in so_lines:
+            dist = line.get('analytic_distribution')
+            if isinstance(dist, dict) and str(account_id) in dist:
+                oid = line.get('order_id')
+                if isinstance(oid, (list, tuple)):
+                    order_ids.add(oid[0])
+                elif oid:
+                    order_ids.add(oid)
+
+        if not order_ids:
+            return []
+
+        orders = odoo.safe_search_read(
+            'sale.order',
+            [('id', 'in', list(order_ids))],
+            fields=['id', 'name', 'partner_id', 'date_order', 'amount_total',
+                    'amount_untaxed', 'state', 'invoice_status'],
+            order='date_order asc',
+        )
+
+        for o in orders:
+            o['partner_name'] = format_many2one(o.get('partner_id'))
+            o['display_date'] = o.get('date_order', '')
+
+        return orders
+    except Exception:
+        return []
+
+
+def get_purchase_orders(odoo, account_id):
+    """Get Purchase Orders linked to an analytic account."""
+    try:
+        po_lines = odoo.search_read(
+            'purchase.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['order_id', 'analytic_distribution'],
+            limit=500,
+        )
+
+        order_ids = set()
+        for line in po_lines:
+            dist = line.get('analytic_distribution')
+            if isinstance(dist, dict) and str(account_id) in dist:
+                oid = line.get('order_id')
+                if isinstance(oid, (list, tuple)):
+                    order_ids.add(oid[0])
+                elif oid:
+                    order_ids.add(oid)
+
+        if not order_ids:
+            return []
+
+        orders = odoo.safe_search_read(
+            'purchase.order',
+            [('id', 'in', list(order_ids))],
+            fields=['id', 'name', 'partner_id', 'date_order', 'amount_total',
+                    'amount_untaxed', 'state', 'invoice_status'],
+            order='date_order asc',
+        )
+
+        for o in orders:
+            o['partner_name'] = format_many2one(o.get('partner_id'))
+            o['display_date'] = o.get('date_order', '')
+
+        return orders
+    except Exception:
+        return []
+
+
+def get_timesheets(odoo, account_id, limit=100):
+    """Get timesheet entries only (not purchase/invoice lines)."""
+    records = odoo.safe_search_read(
+        'account.analytic.line',
+        [
+            ('account_id', '=', account_id),
+            ('project_id', '!=', False),
+        ],
+        fields=['id', 'name', 'date', 'amount', 'unit_amount',
+                'employee_id', 'project_id', 'task_id'],
+        order='date desc',
+        limit=limit,
+    )
+
+    for rec in records:
+        rec['unit_amount_fmt'] = format_duration(rec.get('unit_amount'))
+
+    return records
+
+
+def get_job_financials(odoo, account_id):
+    """Compute accurate financial data from source records.
+
+    Pulls from Sales Orders, Invoices, Bills, and Timesheets
+    to compute a proper P&L instead of relying on custom fields.
+    """
+    # Sales Orders → Contract Value
+    sales_orders = get_sales_orders(odoo, account_id)
+    confirmed_states = ('sale', 'done')
+    original_contract = 0
+    change_orders = 0
+
+    for i, so in enumerate(sales_orders):
+        if so.get('state') in confirmed_states:
+            amt = so.get('amount_untaxed', 0) or so.get('amount_total', 0) or 0
+            if i == 0:
+                original_contract = amt
+            else:
+                change_orders += amt
+
+    total_contract = original_contract + change_orders
+
+    # Invoices & Bills (already fetched with proper separation)
+    invoices, bills = get_account_invoices(odoo, account_id)
+
+    invoice_total = sum(
+        m.get('amount_total', 0) or 0
+        for m in invoices if m.get('move_type') == 'out_invoice' and m.get('state') == 'posted'
+    )
+    credit_note_total = sum(
+        m.get('amount_total', 0) or 0
+        for m in invoices if m.get('move_type') == 'out_refund' and m.get('state') == 'posted'
+    )
+    net_invoiced = invoice_total - credit_note_total
+
+    bill_total = sum(
+        m.get('amount_total', 0) or 0
+        for m in bills if m.get('move_type') == 'in_invoice' and m.get('state') == 'posted'
+    )
+    vendor_refund_total = sum(
+        m.get('amount_total', 0) or 0
+        for m in bills if m.get('move_type') == 'in_refund' and m.get('state') == 'posted'
+    )
+    net_bills = bill_total - vendor_refund_total
+
+    # Labor cost from timesheets
+    timesheets = get_timesheets(odoo, account_id, limit=None)
+    labor_hours = sum(t.get('unit_amount', 0) or 0 for t in timesheets)
+    labor_cost = sum(abs(t.get('amount', 0) or 0) for t in timesheets)
+
+    # Totals
+    total_costs = net_bills + labor_cost
+    gross_profit = total_contract - total_costs
+    margin_pct = (gross_profit / total_contract * 100) if total_contract > 0 else 0
+    billed_vs_costs = net_invoiced - total_costs
+
+    # Get Square Footage for per-sqft calculations
+    field_map = get_custom_field_map(odoo)
+    sqft_tech, _ = resolve_field(field_map, 'Square Footage')
+    sq_ft = 0
+    if sqft_tech:
+        acct = odoo.search_read(
+            'account.analytic.account',
+            [('id', '=', account_id)],
+            fields=[sqft_tech],
+        )
+        if acct:
+            sq_ft = float(acct[0].get(sqft_tech, 0) or 0)
+
+    cost_per_sqft = (total_costs / sq_ft) if sq_ft > 0 else 0
+    revenue_per_sqft = (total_contract / sq_ft) if sq_ft > 0 else 0
+
+    return {
+        'original_contract': original_contract,
+        'change_orders': change_orders,
+        'total_contract': total_contract,
+        'invoice_total': invoice_total,
+        'credit_note_total': credit_note_total,
+        'net_invoiced': net_invoiced,
+        'bill_total': bill_total,
+        'vendor_refund_total': vendor_refund_total,
+        'net_bills': net_bills,
+        'labor_hours': labor_hours,
+        'labor_cost': labor_cost,
+        'total_costs': total_costs,
+        'gross_profit': gross_profit,
+        'margin_pct': margin_pct,
+        'billed_vs_costs': billed_vs_costs,
+        'sq_ft': sq_ft,
+        'cost_per_sqft': cost_per_sqft,
+        'revenue_per_sqft': revenue_per_sqft,
+        'sales_orders': sales_orders,
+        'purchase_orders': get_purchase_orders(odoo, account_id),
+        'invoices': invoices,
+        'bills': bills,
+        'timesheets': timesheets[:100],
+        'labor_hours_fmt': format_duration(labor_hours),
+    }
+
+
 def get_job_detail(odoo, account_id):
     """Fetch full detail for a single analytic account (job).
 
@@ -454,18 +660,18 @@ def get_job_detail(odoo, account_id):
                 'fields': fields,
             })
 
-    # Analytic lines for this account
-    lines = get_analytic_lines(odoo, account_id=account_id, limit=50)
-
-    # Invoices and bills
-    invoices, bills = get_account_invoices(odoo, account_id)
+    # Computed financials from source data
+    financials = get_job_financials(odoo, account_id)
 
     return {
         'account': account,
         'sections': rendered_sections,
-        'lines': lines,
-        'invoices': invoices,
-        'bills': bills,
+        'financials': financials,
+        'timesheets': financials['timesheets'],
+        'sales_orders': financials['sales_orders'],
+        'purchase_orders': financials['purchase_orders'],
+        'invoices': financials['invoices'],
+        'bills': financials['bills'],
     }
 
 
