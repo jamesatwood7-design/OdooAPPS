@@ -56,7 +56,7 @@ def create_app(config_class=Config):
             return redirect(url_for('auth.login'))
         if session.get('auth_type') == 'employee':
             return redirect(url_for('timeclock.dashboard'))
-        return render_template('index.html')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
 
     @app.errorhandler(OdooConnectionError)
     def handle_connection_error(e):

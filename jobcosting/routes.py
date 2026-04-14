@@ -12,61 +12,13 @@ from auth.routes import odoo_user_required
 @bp.route('/')
 @odoo_user_required
 def dashboard():
-    """Job costing dashboard showing projects with cost summaries."""
-    odoo = current_app.odoo
-
-    summaries = []
-    try:
-        summaries = services.get_cost_summary_by_project(odoo)
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-    except OdooAPIError as e:
-        flash(f'Odoo error: {e}', 'danger')
-    except Exception as e:
-        flash(f'Unexpected error loading projects: {e}', 'danger')
-        current_app.logger.exception('Error in jobcosting dashboard')
-
-    return render_template('jobcosting/dashboard.html', summaries=summaries)
+    """Redirect to the Jobs dashboard."""
+    return redirect(url_for('jobcosting.jobs_dashboard'))
 
 
-@bp.route('/project/<int:project_id>')
-@odoo_user_required
-def project_detail(project_id):
-    """Project detail: tasks, analytic lines, budget vs actual."""
-    odoo = current_app.odoo
-
-    detail = None
-    try:
-        detail = services.get_project_detail(odoo, project_id)
-        if not detail:
-            flash('Project not found.', 'warning')
-            return redirect(url_for('jobcosting.dashboard'))
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-        return redirect(url_for('jobcosting.dashboard'))
-    except OdooAPIError as e:
-        flash(f'Odoo error: {e}', 'danger')
-        return redirect(url_for('jobcosting.dashboard'))
-
-    return render_template('jobcosting/project_detail.html', detail=detail)
-
-
-@bp.route('/accounts')
-@odoo_user_required
-def accounts():
-    """List analytic accounts with balances."""
-    odoo = current_app.odoo
-
-    account_list = []
-    try:
-        account_list = services.get_analytic_accounts(odoo)
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-    except OdooAPIError as e:
-        flash(f'Odoo error: {e}', 'danger')
-
-    return render_template('jobcosting/accounts.html', accounts=account_list)
-
+# ---------------------------------------------------------------------------
+# Analytic Entries (still useful for viewing/creating line items)
+# ---------------------------------------------------------------------------
 
 @bp.route('/entries')
 @odoo_user_required
@@ -74,7 +26,6 @@ def entries():
     """Browse analytic items with filters."""
     odoo = current_app.odoo
 
-    project_id = request.args.get('project_id', type=int)
     account_id = request.args.get('account_id', type=int)
     date_from_str = request.args.get('date_from', '')
     date_to_str = request.args.get('date_to', '')
@@ -93,16 +44,13 @@ def entries():
             pass
 
     lines = []
-    projects = []
     account_list = []
 
     try:
-        projects = services.get_projects(odoo)
         account_list = services.get_analytic_accounts(odoo)
         lines = services.get_analytic_lines(
             odoo,
             account_id=account_id,
-            project_id=project_id,
             date_from=date_from,
             date_to=date_to,
         )
@@ -114,9 +62,9 @@ def entries():
     return render_template(
         'jobcosting/entries.html',
         lines=lines,
-        projects=projects,
+        projects=[],
         accounts=account_list,
-        selected_project_id=project_id,
+        selected_project_id=None,
         selected_account_id=account_id,
         date_from=date_from,
         date_to=date_to,
@@ -132,7 +80,6 @@ def create_entry():
     if request.method == 'POST':
         entry_type = request.form.get('entry_type', 'time')
         account_id = request.form.get('account_id', type=int)
-        project_id = request.form.get('project_id', type=int)
         description = request.form.get('description', '').strip()
         entry_date_str = request.form.get('entry_date', '')
 
@@ -161,7 +108,7 @@ def create_entry():
                     return redirect(url_for('jobcosting.create_entry'))
 
                 services.create_time_entry(
-                    odoo, account_id, project_id, task_id,
+                    odoo, account_id, None, task_id,
                     employee_id, entry_date, hours, description, hourly_rate,
                 )
                 flash('Time entry created successfully.', 'success')
@@ -173,12 +120,9 @@ def create_entry():
 
                 services.create_expense_entry(
                     odoo, account_id, entry_date, amount, description,
-                    project_id=project_id,
                 )
                 flash('Expense entry created successfully.', 'success')
 
-            if project_id:
-                return redirect(url_for('jobcosting.project_detail', project_id=project_id))
             return redirect(url_for('jobcosting.entries'))
 
         except OdooConnectionError as e:
@@ -187,12 +131,10 @@ def create_entry():
             flash(f'Error creating entry: {e}', 'danger')
 
     # GET request - load dropdown data
-    projects = []
     account_list = []
     employees = []
 
     try:
-        projects = services.get_projects(odoo)
         account_list = services.get_analytic_accounts(odoo)
         employees = services.get_employees(odoo)
     except OdooConnectionError as e:
@@ -202,85 +144,15 @@ def create_entry():
 
     return render_template(
         'jobcosting/create_entry.html',
-        projects=projects,
+        projects=[],
         accounts=account_list,
         employees=employees,
         today=date.today(),
     )
 
 
-@bp.route('/report')
-@odoo_user_required
-def report_list():
-    """Select a project to view its job cost report."""
-    odoo = current_app.odoo
-
-    projects = []
-    try:
-        projects = services.get_projects(odoo)
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-    except OdooAPIError as e:
-        flash(f'Odoo error: {e}', 'danger')
-
-    return render_template('jobcosting/report_list.html', projects=projects)
-
-
-@bp.route('/report/<int:project_id>')
-@odoo_user_required
-def report(project_id):
-    """Budget vs actual report for a specific project."""
-    odoo = current_app.odoo
-
-    report_data = None
-    try:
-        report_data = services.get_job_cost_report(odoo, project_id)
-        if not report_data:
-            flash('Project not found.', 'warning')
-            return redirect(url_for('jobcosting.report_list'))
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-        return redirect(url_for('jobcosting.report_list'))
-    except OdooAPIError as e:
-        flash(f'Odoo error: {e}', 'danger')
-        return redirect(url_for('jobcosting.report_list'))
-
-    return render_template('jobcosting/report.html', report=report_data)
-
-
-@bp.route('/api/tasks/<int:project_id>')
-def api_tasks(project_id):
-    """JSON endpoint for cascading task dropdown."""
-    odoo = current_app.odoo
-    try:
-        tasks = services.get_tasks_for_project(odoo, project_id)
-        return jsonify([
-            {'id': t['id'], 'name': t['name']}
-            for t in tasks
-        ])
-    except (OdooConnectionError, OdooAPIError) as e:
-        return jsonify({'error': str(e)}), 503
-
-
-@bp.route('/api/project-account/<int:project_id>')
-def api_project_account(project_id):
-    """JSON endpoint to get the analytic account for a project."""
-    odoo = current_app.odoo
-    try:
-        project = services.get_project(odoo, project_id)
-        if project and project.get('analytic_account_id'):
-            acct = project['analytic_account_id']
-            return jsonify({
-                'account_id': acct[0] if isinstance(acct, (list, tuple)) else acct,
-                'account_name': acct[1] if isinstance(acct, (list, tuple)) else str(acct),
-            })
-        return jsonify({'account_id': None, 'account_name': None})
-    except (OdooConnectionError, OdooAPIError) as e:
-        return jsonify({'error': str(e)}), 503
-
-
 # ---------------------------------------------------------------------------
-# Custom Job Costing views (analytic-account-centric)
+# Jobs views (analytic-account-centric)
 # ---------------------------------------------------------------------------
 
 @bp.route('/jobs')
@@ -346,7 +218,6 @@ def job_save(account_id):
         if not data or not isinstance(data, dict):
             return jsonify({'error': 'No data provided'}), 400
 
-        # Sanitize: only allow x_ prefixed fields (custom fields)
         safe_values = {}
         for field_name, value in data.items():
             if field_name.startswith('x_') or field_name in ('name', 'code'):

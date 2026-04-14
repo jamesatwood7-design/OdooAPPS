@@ -47,7 +47,9 @@ class TestAccessControl:
     def test_odoo_user_can_access_jobcosting(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
         mock_odoo.read_group.return_value = []
-        resp = odoo_user_client.get('/jobcosting/')
+        mock_odoo.fields_get.return_value = {}
+        mock_odoo.search_read.return_value = []
+        resp = odoo_user_client.get('/jobcosting/jobs')
         assert resp.status_code == 200
 
 
@@ -107,18 +109,10 @@ class TestTimeclockRoutes:
 
 
 class TestJobcostingRoutes:
-    def test_dashboard_loads(self, odoo_user_client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = []
-        mock_odoo.read_group.return_value = []
-
-        resp = odoo_user_client.get('/jobcosting/')
-        assert resp.status_code == 200
-        assert b'Job Costing' in resp.data
-
-    def test_accounts_page(self, odoo_user_client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = []
-        resp = odoo_user_client.get('/jobcosting/accounts')
-        assert resp.status_code == 200
+    def test_dashboard_redirects_to_jobs(self, odoo_user_client):
+        resp = odoo_user_client.get('/jobcosting/', follow_redirects=False)
+        assert resp.status_code == 302
+        assert '/jobs' in resp.headers['Location']
 
     def test_entries_page(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
@@ -138,8 +132,6 @@ class TestJobcostingRoutes:
         resp = odoo_user_client.post('/jobcosting/entries/create', data={
             'entry_type': 'time',
             'account_id': '10',
-            'project_id': '1',
-            'task_id': '1',
             'employee_id': '1',
             'entry_date': '2024-01-15',
             'hours': '2.5',
@@ -149,11 +141,6 @@ class TestJobcostingRoutes:
 
         assert resp.status_code == 302
         mock_odoo.create.assert_called_once()
-
-    def test_report_list(self, odoo_user_client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = []
-        resp = odoo_user_client.get('/jobcosting/report')
-        assert resp.status_code == 200
 
 
 class TestJobsRoutes:
