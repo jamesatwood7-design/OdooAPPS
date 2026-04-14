@@ -81,16 +81,16 @@
         <!-- Today's Quick Stats -->
         {% if today_summary %}
         <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="card text-center">
+            <div class="col-6 col-md-3">
+                <div class="card text-center h-100">
                     <div class="card-body">
                         <h6 class="text-muted">Today's Hours</h6>
                         <h3>{{ today_summary.total_hours_fmt }}</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card text-center">
+            <div class="col-6 col-md-3">
+                <div class="card text-center h-100">
                     <div class="card-body">
                         <h6 class="text-muted">Entries Today</h6>
                         <h3>{{ today_summary.record_count }}</h3>
@@ -98,10 +98,9 @@
                 </div>
             </div>
             {% if session.get('auth_type') == 'odoo_user' %}
-            <div class="col-md-4">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <h6 class="text-muted">Quick Links</h6>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body d-flex flex-wrap align-items-center justify-content-center gap-2">
                         {% if is_manager %}
                         <a href="{{ url_for('timeclock.allocate_list') }}" class="btn btn-sm btn-outline-warning me-1">
                             <i class="bi bi-clock-history"></i> Allocate Team Time

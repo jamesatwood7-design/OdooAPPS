@@ -120,7 +120,8 @@
                                     <td>
                                         <div class="progress" style="height: 20px;">
                                             {% set pct = (day.hours / 10 * 100) if day.hours > 0 else 0 %}
-                                            <div class="progress-bar bg-success" style="width: {{ pct|min(100) }}%"></div>
+                                            {% if pct > 100 %}{% set pct = 100 %}{% endif %}
+                                            <div class="progress-bar bg-success" style="width: {{ pct }}%"></div>
                                         </div>
                                     </td>
                                 </tr>
