@@ -321,3 +321,31 @@ def job_detail(account_id):
         return redirect(url_for('jobcosting.jobs_dashboard'))
 
     return render_template('jobcosting/job_detail.html', detail=detail)
+
+
+@bp.route('/job/<int:account_id>/save', methods=['POST'])
+def job_save(account_id):
+    """Save edited fields on an analytic account."""
+    odoo = current_app.odoo
+
+    try:
+        data = request.get_json()
+        if not data or not isinstance(data, dict):
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Sanitize: only allow x_ prefixed fields (custom fields)
+        safe_values = {}
+        for field_name, value in data.items():
+            if field_name.startswith('x_') or field_name in ('name', 'code'):
+                safe_values[field_name] = value
+
+        if not safe_values:
+            return jsonify({'error': 'No valid fields to update'}), 400
+
+        odoo.write('account.analytic.account', [account_id], safe_values)
+        return jsonify({'success': True})
+
+    except OdooAPIError as e:
+        return jsonify({'error': str(e)}), 400
+    except (OdooConnectionError, Exception) as e:
+        return jsonify({'error': str(e)}), 500

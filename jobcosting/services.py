@@ -414,15 +414,17 @@ def get_job_detail(odoo, account_id):
     rendered_sections = []
     for section_name, field_defs in sections:
         fields = []
-        for display_label, tech_name, field_info in field_defs:
+        for display_label, tech_name, field_info, display_format in field_defs:
             raw_value = account.get(tech_name, '')
             formatted = format_odoo_value(raw_value, field_info)
-            if formatted:  # skip empty fields
-                fields.append({
-                    'label': display_label,
-                    'value': formatted,
-                    'type': field_info.get('type', 'char') if field_info else 'char',
-                })
+            fields.append({
+                'label': display_label,
+                'value': formatted,
+                'raw_value': raw_value,
+                'type': field_info.get('type', 'char') if field_info else 'char',
+                'display_format': display_format,
+                'technical_name': tech_name,
+            })
         if fields:
             rendered_sections.append({
                 'name': section_name,
@@ -444,20 +446,49 @@ def get_job_detail(odoo, account_id):
     }
 
 
-def get_account_invoices(odoo, account_id):
-    """Fetch invoices and bills linked to an analytic account.
-
-    In Odoo 17, analytic_distribution on account.move.line is a JSON
-    field mapping account IDs to percentages. We search for move lines
-    that reference our account, then fetch the parent moves.
-
-    Returns (invoices, bills) as two separate lists.
-    """
+def _fetch_moves_by_ids(odoo, move_ids):
+    """Fetch account.move records and split into invoices and bills."""
     invoices = []
     bills = []
 
+    if not move_ids:
+        return invoices, bills
+
+    moves = odoo.safe_search_read(
+        'account.move',
+        [('id', 'in', list(move_ids))],
+        fields=[
+            'id', 'name', 'ref', 'partner_id', 'invoice_date', 'date',
+            'amount_total', 'amount_residual', 'state', 'move_type',
+            'payment_state',
+        ],
+        order='invoice_date desc',
+    )
+
+    for move in moves:
+        move['partner_name'] = format_many2one(move.get('partner_id'))
+        move['display_date'] = move.get('invoice_date') or move.get('date') or ''
+        move_type = move.get('move_type', '')
+        if move_type in ('out_invoice', 'out_refund'):
+            invoices.append(move)
+        elif move_type in ('in_invoice', 'in_refund'):
+            bills.append(move)
+
+    return invoices, bills
+
+
+def get_account_invoices(odoo, account_id):
+    """Fetch invoices and bills linked to an analytic account.
+
+    Tries multiple strategies since Odoo versions handle the link differently:
+    1. analytic_distribution JSON field on account.move.line (Odoo 17+)
+    2. analytic_account_id on account.move.line (older Odoo / some configs)
+    3. Via analytic lines that have move_line_id
+
+    Returns (invoices, bills) as two separate lists.
+    """
+    # Strategy 1: analytic_distribution ilike search (Odoo 17)
     try:
-        # Step 1: Find move lines with this analytic account
         move_lines = odoo.search_read(
             'account.move.line',
             [('analytic_distribution', 'ilike', str(account_id))],
@@ -465,7 +496,6 @@ def get_account_invoices(odoo, account_id):
             limit=500,
         )
 
-        # Step 2: Filter for exact account ID match and collect unique move IDs
         move_ids = set()
         for ml in move_lines:
             dist = ml.get('analytic_distribution')
@@ -476,83 +506,78 @@ def get_account_invoices(odoo, account_id):
                 elif move_val:
                     move_ids.add(move_val)
 
-        if not move_ids:
-            return invoices, bills
+        if move_ids:
+            return _fetch_moves_by_ids(odoo, move_ids)
+    except Exception:
+        pass
 
-        # Step 3: Fetch the moves
-        moves = odoo.safe_search_read(
-            'account.move',
-            [('id', 'in', list(move_ids))],
-            fields=[
-                'id', 'name', 'ref', 'partner_id', 'invoice_date', 'date',
-                'amount_total', 'amount_residual', 'state', 'move_type',
-                'payment_state',
-            ],
-            order='invoice_date desc',
+    # Strategy 2: analytic_account_id direct field on move lines
+    try:
+        move_lines = odoo.search_read(
+            'account.move.line',
+            [('analytic_account_id', '=', account_id)],
+            fields=['move_id'],
+            limit=500,
         )
 
-        # Step 4: Split into invoices and bills
-        for move in moves:
-            move['partner_name'] = format_many2one(move.get('partner_id'))
-            move['display_date'] = move.get('invoice_date') or move.get('date') or ''
-            move_type = move.get('move_type', '')
-            if move_type in ('out_invoice', 'out_refund'):
-                invoices.append(move)
-            elif move_type in ('in_invoice', 'in_refund'):
-                bills.append(move)
+        move_ids = set()
+        for ml in move_lines:
+            move_val = ml.get('move_id')
+            if isinstance(move_val, (list, tuple)):
+                move_ids.add(move_val[0])
+            elif move_val:
+                move_ids.add(move_val)
 
+        if move_ids:
+            return _fetch_moves_by_ids(odoo, move_ids)
     except Exception:
-        # Fallback: if analytic_distribution search doesn't work,
-        # try via analytic lines that have move_id
-        try:
-            lines = odoo.search_read(
-                'account.analytic.line',
-                [('account_id', '=', account_id), ('move_line_id', '!=', False)],
-                fields=['move_line_id'],
-                limit=500,
+        pass
+
+    # Strategy 3: via analytic lines → move_line_id → move_id
+    try:
+        # Try move_id first (some Odoo versions have it directly)
+        a_lines = odoo.safe_search_read(
+            'account.analytic.line',
+            [('account_id', '=', account_id)],
+            fields=['move_id', 'move_line_id'],
+            limit=500,
+        )
+
+        move_ids = set()
+        move_line_ids = []
+
+        for l in a_lines:
+            # Direct move_id on analytic line
+            mv = l.get('move_id')
+            if isinstance(mv, (list, tuple)) and mv[0]:
+                move_ids.add(mv[0])
+            elif mv and mv is not True:
+                move_ids.add(mv)
+
+            # Or via move_line_id
+            ml = l.get('move_line_id')
+            if isinstance(ml, (list, tuple)) and ml[0]:
+                move_line_ids.append(ml[0])
+            elif ml and ml is not True:
+                move_line_ids.append(ml)
+
+        # Get moves from move_line_ids
+        if move_line_ids and not move_ids:
+            aml_records = odoo.search_read(
+                'account.move.line',
+                [('id', 'in', move_line_ids)],
+                fields=['move_id'],
             )
-            move_line_ids = []
-            for l in lines:
-                ml = l.get('move_line_id')
-                if isinstance(ml, (list, tuple)):
-                    move_line_ids.append(ml[0])
-                elif ml:
-                    move_line_ids.append(ml)
+            for r in aml_records:
+                mv = r.get('move_id')
+                if isinstance(mv, (list, tuple)):
+                    move_ids.add(mv[0])
+                elif mv:
+                    move_ids.add(mv)
 
-            if move_line_ids:
-                aml_records = odoo.search_read(
-                    'account.move.line',
-                    [('id', 'in', move_line_ids)],
-                    fields=['move_id'],
-                )
-                move_ids = set()
-                for r in aml_records:
-                    mv = r.get('move_id')
-                    if isinstance(mv, (list, tuple)):
-                        move_ids.add(mv[0])
-                    elif mv:
-                        move_ids.add(mv)
+        if move_ids:
+            return _fetch_moves_by_ids(odoo, move_ids)
+    except Exception:
+        pass
 
-                if move_ids:
-                    moves = odoo.safe_search_read(
-                        'account.move',
-                        [('id', 'in', list(move_ids))],
-                        fields=[
-                            'id', 'name', 'ref', 'partner_id', 'invoice_date',
-                            'date', 'amount_total', 'amount_residual', 'state',
-                            'move_type', 'payment_state',
-                        ],
-                        order='invoice_date desc',
-                    )
-                    for move in moves:
-                        move['partner_name'] = format_many2one(move.get('partner_id'))
-                        move['display_date'] = move.get('invoice_date') or move.get('date') or ''
-                        move_type = move.get('move_type', '')
-                        if move_type in ('out_invoice', 'out_refund'):
-                            invoices.append(move)
-                        elif move_type in ('in_invoice', 'in_refund'):
-                            bills.append(move)
-        except Exception:
-            pass
-
-    return invoices, bills
+    return [], []

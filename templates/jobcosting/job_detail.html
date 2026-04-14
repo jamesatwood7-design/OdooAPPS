@@ -14,6 +14,15 @@
         </h2>
     </div>
     <div>
+        <button type="button" class="btn btn-warning me-2" id="editBtn" onclick="toggleEdit()">
+            <i class="bi bi-pencil"></i> Edit
+        </button>
+        <button type="button" class="btn btn-success me-2 d-none" id="saveBtn" onclick="saveChanges()">
+            <i class="bi bi-check-circle"></i> Save
+        </button>
+        <button type="button" class="btn btn-outline-secondary me-2 d-none" id="cancelBtn" onclick="cancelEdit()">
+            Cancel
+        </button>
         <a href="{{ url_for('jobcosting.create_entry') }}?account_id={{ detail.account.id }}"
            class="btn btn-primary me-2">
             <i class="bi bi-plus-circle"></i> Add Entry
@@ -52,15 +61,17 @@
                 <div class="card text-center h-100 border-0 bg-light">
                     <div class="card-body py-2 px-3">
                         <small class="text-muted d-block">{{ field.label }}</small>
-                        <strong class="{% if field.type in ('float', 'monetary') %}fs-5{% endif %}
+                        <strong class="{% if field.display_format == 'currency' %}fs-5{% endif %}
                                       {% if 'margin' in field.label|lower and '-' in field.value %}text-danger{% endif %}
-                                      {% if 'profit' in field.label|lower and '-' not in field.value and field.value != '0.00' %}text-success{% endif %}">
-                            {% if field.type in ('float', 'monetary') and field.value %}
+                                      {% if 'profit' in field.label|lower and '-' not in field.value and field.value != '0.00' and field.value %}text-success{% endif %}"
+                               data-field="{{ field.technical_name }}"
+                               data-format="{{ field.display_format }}">
+                            {% if field.display_format == 'currency' and field.value %}
                                 ${{ field.value }}
-                            {% elif 'margin' in field.label|lower and '%' not in field.value and field.type == 'float' %}
+                            {% elif field.display_format == 'percent' and field.value %}
                                 {{ field.value }}%
                             {% else %}
-                                {{ field.value }}
+                                {{ field.value or '-' }}
                             {% endif %}
                         </strong>
                     </div>
@@ -75,13 +86,16 @@
             <div class="col-md-6 mb-2">
                 <div class="d-flex justify-content-between border-bottom pb-1">
                     <span class="text-muted">{{ field.label }}</span>
-                    <strong>
-                        {% if field.type in ('float', 'monetary') and field.value %}
+                    <span class="editable-field fw-bold" data-field="{{ field.technical_name }}"
+                          data-format="{{ field.display_format }}" data-type="{{ field.type }}">
+                        {% if field.display_format == 'currency' and field.value %}
                             ${{ field.value }}
+                        {% elif field.display_format == 'percent' and field.value %}
+                            {{ field.value }}%
                         {% else %}
-                            {{ field.value }}
+                            {{ field.value or '-' }}
                         {% endif %}
-                    </strong>
+                    </span>
                 </div>
             </div>
             {% endfor %}
@@ -263,4 +277,114 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var accountId = {{ detail.account.id }};
+var editMode = false;
+var originalValues = {};
+
+function toggleEdit() {
+    editMode = true;
+    document.getElementById('editBtn').classList.add('d-none');
+    document.getElementById('saveBtn').classList.remove('d-none');
+    document.getElementById('cancelBtn').classList.remove('d-none');
+
+    document.querySelectorAll('.editable-field').forEach(function(el) {
+        var fieldName = el.dataset.field;
+        var fieldType = el.dataset.type;
+        var format = el.dataset.format;
+        var currentText = el.textContent.trim();
+
+        originalValues[fieldName] = el.innerHTML;
+
+        var rawVal = currentText.replace(/^\$/, '').replace(/%$/, '').replace(/,/g, '').trim();
+        if (rawVal === '-') rawVal = '';
+
+        var input;
+        if (fieldType === 'text' || fieldType === 'html') {
+            input = document.createElement('textarea');
+            input.rows = 2;
+            input.className = 'form-control form-control-sm';
+        } else if (fieldType === 'date') {
+            input = document.createElement('input');
+            input.type = 'date';
+            input.className = 'form-control form-control-sm';
+        } else {
+            input = document.createElement('input');
+            input.type = (format === 'currency' || format === 'number' || format === 'percent')
+                ? 'number' : 'text';
+            if (input.type === 'number') input.step = 'any';
+            input.className = 'form-control form-control-sm';
+        }
+
+        input.value = rawVal;
+        input.dataset.field = fieldName;
+        input.dataset.format = format;
+        el.innerHTML = '';
+        el.appendChild(input);
+    });
+}
+
+function cancelEdit() {
+    editMode = false;
+    document.getElementById('editBtn').classList.remove('d-none');
+    document.getElementById('saveBtn').classList.add('d-none');
+    document.getElementById('cancelBtn').classList.add('d-none');
+
+    document.querySelectorAll('.editable-field').forEach(function(el) {
+        var fieldName = el.dataset.field;
+        if (originalValues[fieldName] !== undefined) {
+            el.innerHTML = originalValues[fieldName];
+        }
+    });
+    originalValues = {};
+}
+
+function saveChanges() {
+    var changes = {};
+    document.querySelectorAll('.editable-field input, .editable-field textarea, .editable-field select').forEach(function(input) {
+        var fieldName = input.dataset.field;
+        var val = input.value;
+
+        if (input.type === 'number' && val !== '') {
+            val = parseFloat(val);
+        } else if (val === '') {
+            val = false;
+        }
+
+        changes[fieldName] = val;
+    });
+
+    if (Object.keys(changes).length === 0) {
+        cancelEdit();
+        return;
+    }
+
+    document.getElementById('saveBtn').disabled = true;
+    document.getElementById('saveBtn').innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
+
+    fetch('/jobcosting/job/' + accountId + '/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes)
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Error saving: ' + (data.error || 'Unknown error'));
+            document.getElementById('saveBtn').disabled = false;
+            document.getElementById('saveBtn').innerHTML = '<i class="bi bi-check-circle"></i> Save';
+        }
+    })
+    .catch(function(err) {
+        alert('Error saving: ' + err);
+        document.getElementById('saveBtn').disabled = false;
+        document.getElementById('saveBtn').innerHTML = '<i class="bi bi-check-circle"></i> Save';
+    });
+}
+</script>
 {% endblock %}

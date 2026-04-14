@@ -10,6 +10,7 @@ import re
 
 # Dashboard columns: (display_label, odoo_label_to_match, sort_type)
 # sort_type is used by the JS for client-side sorting
+# sort_type 'currency' fields get $ prefix, 'number' fields don't
 DASHBOARD_COLUMNS = [
     ('Code', 'code', 'text'),
     ('Job Name', 'name', 'text'),
@@ -27,42 +28,43 @@ DASHBOARD_COLUMNS = [
     ('Salesman', 'Salesman', 'text'),
 ]
 
-# Detail page sections: (section_name, [(display_label, odoo_label_to_match)])
+# Detail page sections: (section_name, [(display_label, odoo_label_to_match, display_format)])
+# display_format: 'currency' adds $, 'percent' adds %, 'number' plain, 'text' plain
 DETAIL_SECTIONS = [
     ('Job Information', [
-        ('Customer', 'Customer'),
-        ('Square Footage', 'Square Footage'),
-        ('Building Type', 'Building Type'),
-        ('Date Started', 'Date Started'),
-        ('Date Completed', 'Date Completed'),
-        ('Salesman', 'Salesman'),
+        ('Customer', 'Customer', 'text'),
+        ('Square Footage', 'Square Footage', 'number'),
+        ('Building Type', 'Building Type', 'text'),
+        ('Date Started', 'Date Started', 'text'),
+        ('Date Completed', 'Date Completed', 'text'),
+        ('Salesman', 'Salesman', 'text'),
     ]),
     ('Revenue & Pricing', [
-        ('Revenue per Sq Ft', 'Revenue per Sq'),
-        ('Current Sales Price', 'Current Sales Price'),
-        ('Last Project Sales Price', 'Last Project Sales'),
-        ('Last Offered Sales Price', 'Last Offered Sales'),
-        ('Overhead Sales Price', 'Overhead Sales Price'),
-        ('Primer P1', 'Primer P1'),
+        ('Revenue per Sq Ft', 'Revenue per Sq', 'currency'),
+        ('Current Sales Price', 'Current Sales Price', 'currency'),
+        ('Last Project Sales Price', 'Last Project Sales', 'currency'),
+        ('Last Offered Sales Price', 'Last Offered Sales', 'currency'),
+        ('Overhead Sales Price', 'Overhead Sales Price', 'currency'),
+        ('Primer P1', 'Primer P1', 'currency'),
     ]),
     ('Change Orders', [
-        ('Change Order #1', 'Change Order #1'),
-        ('CO #1 Description', 'CO P1 Description'),
-        ('Change Order #2', 'Change Order #2'),
-        ('CO #2 Description', 'CO P2 Description'),
+        ('Change Order #1', 'Change Order #1', 'currency'),
+        ('CO #1 Description', 'CO P1 Description', 'text'),
+        ('Change Order #2', 'Change Order #2', 'currency'),
+        ('CO #2 Description', 'CO P2 Description', 'text'),
     ]),
     ('Expenses & Margins', [
-        ('Subcontracting to Invoice', 'Subcontracting to Invoice'),
-        ('Total Expenses', 'Total Expenses'),
-        ('Guard Rail Expenses', 'Guard'),
-        ('Current Margin', 'Current Margin'),
-        ('Actual Margin %', 'Actual Margin'),
-        ('Actual Profit', 'Actual Profit'),
-        ('Projected Profit', 'Projected Profit'),
+        ('Subcontracting to Invoice', 'Subcontracting to Invoice', 'currency'),
+        ('Total Expenses', 'Total Expenses', 'currency'),
+        ('Guard Rail Expenses', 'Guard', 'currency'),
+        ('Current Margin', 'Current Margin', 'currency'),
+        ('Actual Margin %', 'Actual Margin', 'percent'),
+        ('Actual Profit', 'Actual Profit', 'currency'),
+        ('Projected Profit', 'Projected Profit', 'currency'),
     ]),
     ('Commissions', [
-        ('Commission Check', 'Commission Check'),
-        ('Commission Paid', 'Commission Paid'),
+        ('Commission Check', 'Commission Check', 'currency'),
+        ('Commission Paid', 'Commission Paid', 'currency'),
     ]),
 ]
 
@@ -173,10 +175,10 @@ def resolve_detail_sections(odoo):
 
     for section_name, field_defs in DETAIL_SECTIONS:
         resolved_fields = []
-        for display_label, odoo_label in field_defs:
+        for display_label, odoo_label, display_format in field_defs:
             tech_name, field_info = resolve_field(field_map, odoo_label)
             if tech_name:
-                resolved_fields.append((display_label, tech_name, field_info))
+                resolved_fields.append((display_label, tech_name, field_info, display_format))
                 technical_names.add(tech_name)
 
         if resolved_fields:
