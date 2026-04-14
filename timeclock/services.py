@@ -9,7 +9,7 @@ def get_all_employees(odoo):
     """Return a list of all employees with their attendance state."""
     return odoo.safe_search_read(
         'hr.employee', [],
-        fields=['id', 'name', 'attendance_state'],
+        fields=['id', 'name', 'attendance_state', 'parent_id'],
         order='name asc',
     )
 
@@ -19,9 +19,42 @@ def get_employee(odoo, employee_id):
     records = odoo.safe_search_read(
         'hr.employee',
         [('id', '=', employee_id)],
-        fields=['id', 'name', 'attendance_state', 'last_attendance_id'],
+        fields=['id', 'name', 'attendance_state', 'last_attendance_id', 'parent_id'],
     )
     return records[0] if records else None
+
+
+def get_subordinates(odoo, manager_employee_id):
+    """Get employees who report to the given manager (direct reports)."""
+    return odoo.safe_search_read(
+        'hr.employee',
+        [('parent_id', '=', manager_employee_id)],
+        fields=['id', 'name', 'attendance_state'],
+        order='name asc',
+    )
+
+
+def is_manager(odoo, employee_id):
+    """Check if an employee is a manager (has direct reports)."""
+    subordinates = odoo.search(
+        'hr.employee',
+        [('parent_id', '=', employee_id)],
+        limit=1,
+    )
+    return len(subordinates) > 0
+
+
+def can_manage_employee(odoo, manager_id, target_employee_id):
+    """Check if manager_id is the manager of target_employee_id."""
+    if manager_id == target_employee_id:
+        return True
+    emp = get_employee(odoo, target_employee_id)
+    if not emp:
+        return False
+    parent = emp.get('parent_id')
+    if isinstance(parent, (list, tuple)):
+        return parent[0] == manager_id
+    return parent == manager_id
 
 
 def get_attendance_status(odoo, employee_id):

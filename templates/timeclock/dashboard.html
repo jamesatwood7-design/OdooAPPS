@@ -99,9 +99,11 @@
                 <div class="card text-center">
                     <div class="card-body">
                         <h6 class="text-muted">Quick Links</h6>
+                        {% if is_manager %}
                         <a href="{{ url_for('timeclock.allocate_list') }}" class="btn btn-sm btn-outline-warning me-1">
-                            <i class="bi bi-clock-history"></i> Allocate Time
+                            <i class="bi bi-clock-history"></i> Allocate Team Time
                         </a>
+                        {% endif %}
                         <a href="{{ url_for('timeclock.history') }}" class="btn btn-sm btn-outline-primary me-1">History</a>
                         <a href="{{ url_for('timeclock.summary') }}" class="btn btn-sm btn-outline-primary">Summary</a>
                     </div>

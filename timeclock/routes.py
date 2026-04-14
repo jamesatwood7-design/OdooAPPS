@@ -8,6 +8,11 @@ from timeclock import services
 from common.exceptions import OdooAPIError, OdooConnectionError
 
 
+def _is_manager_session():
+    """Check if the current session is in manager mode."""
+    return session.get('timeclock_is_manager', False)
+
+
 @bp.route('/')
 def dashboard():
     """Main time clock dashboard showing employee status and clock in/out button."""
@@ -17,6 +22,7 @@ def dashboard():
     employees = []
     status = None
     today_summary = None
+    is_mgr = False
 
     try:
         employees = services.get_all_employees(odoo)
@@ -24,6 +30,8 @@ def dashboard():
         if employee_id:
             status = services.get_attendance_status(odoo, employee_id)
             today_summary = services.get_daily_summary(odoo, employee_id)
+            is_mgr = services.is_manager(odoo, employee_id)
+            session['timeclock_is_manager'] = is_mgr
     except OdooConnectionError as e:
         flash(f'Cannot connect to Odoo: {e}', 'danger')
     except OdooAPIError as e:
@@ -35,6 +43,7 @@ def dashboard():
         selected_employee_id=employee_id,
         status=status,
         today_summary=today_summary,
+        is_manager=is_mgr,
     )
 
 
@@ -44,8 +53,11 @@ def select_employee():
     employee_id = request.form.get('employee_id', type=int)
     if employee_id:
         session['timeclock_employee_id'] = employee_id
+        # Clear manager flag; will be re-evaluated on dashboard load
+        session.pop('timeclock_is_manager', None)
     else:
         session.pop('timeclock_employee_id', None)
+        session.pop('timeclock_is_manager', None)
     return redirect(url_for('timeclock.dashboard'))
 
 
@@ -191,19 +203,35 @@ def api_status():
 
 @bp.route('/allocate')
 def allocate_list():
-    """Show attendance records that need time allocation."""
-    employee_id = session.get('timeclock_employee_id')
-    if not employee_id:
-        flash('Please select an employee first.', 'warning')
+    """Show team members with attendance records that need time allocation.
+
+    Manager-only: requires the logged-in employee to have direct reports.
+    Shows only the manager's subordinates.
+    """
+    manager_id = session.get('timeclock_employee_id')
+    if not manager_id:
+        flash('Please select your employee profile first.', 'warning')
+        return redirect(url_for('timeclock.dashboard'))
+
+    if not _is_manager_session():
+        flash('Only managers can access time allocation.', 'danger')
         return redirect(url_for('timeclock.dashboard'))
 
     odoo = current_app.odoo
-    unallocated = []
-    employee = None
+    subordinates_data = []
+    manager = None
 
     try:
-        employee = services.get_employee(odoo, employee_id)
-        unallocated = services.get_unallocated_attendances(odoo, employee_id)
+        manager = services.get_employee(odoo, manager_id)
+        subordinates = services.get_subordinates(odoo, manager_id)
+
+        for sub in subordinates:
+            unallocated = services.get_unallocated_attendances(odoo, sub['id'])
+            subordinates_data.append({
+                'employee': sub,
+                'unallocated': unallocated,
+                'unallocated_count': len(unallocated),
+            })
     except OdooConnectionError as e:
         flash(f'Cannot connect to Odoo: {e}', 'danger')
     except OdooAPIError as e:
@@ -211,24 +239,47 @@ def allocate_list():
 
     return render_template(
         'timeclock/allocate_list.html',
-        employee=employee,
-        unallocated=unallocated,
+        manager=manager,
+        subordinates_data=subordinates_data,
     )
 
 
 @bp.route('/allocate/<int:attendance_id>', methods=['GET', 'POST'])
 def allocate(attendance_id):
-    """Allocate hours from an attendance record to jobs."""
-    employee_id = session.get('timeclock_employee_id')
-    if not employee_id:
-        flash('Please select an employee first.', 'warning')
+    """Allocate hours from an attendance record to jobs.
+
+    Manager-only: verifies the attendance belongs to a subordinate.
+    """
+    manager_id = session.get('timeclock_employee_id')
+    if not manager_id:
+        flash('Please select your employee profile first.', 'warning')
+        return redirect(url_for('timeclock.dashboard'))
+
+    if not _is_manager_session():
+        flash('Only managers can access time allocation.', 'danger')
         return redirect(url_for('timeclock.dashboard'))
 
     odoo = current_app.odoo
 
+    # Verify the attendance record belongs to a subordinate
+    try:
+        att_check = services.get_attendance_record(odoo, attendance_id)
+        if not att_check:
+            flash('Attendance record not found.', 'warning')
+            return redirect(url_for('timeclock.allocate_list'))
+
+        att_emp = att_check.get('employee_id')
+        target_emp_id = att_emp[0] if isinstance(att_emp, (list, tuple)) else att_emp
+
+        if not services.can_manage_employee(odoo, manager_id, target_emp_id):
+            flash('You can only allocate time for your direct reports.', 'danger')
+            return redirect(url_for('timeclock.allocate_list'))
+    except (OdooConnectionError, OdooAPIError) as e:
+        flash(f'Error: {e}', 'danger')
+        return redirect(url_for('timeclock.allocate_list'))
+
     if request.method == 'POST':
         try:
-            # Parse allocation rows from form
             allocations = []
             hourly_rate = request.form.get('hourly_rate', 0, type=float)
             i = 0
@@ -248,7 +299,7 @@ def allocate(attendance_id):
                 return redirect(url_for('timeclock.allocate', attendance_id=attendance_id))
 
             services.save_time_allocations(
-                odoo, attendance_id, employee_id, allocations, hourly_rate
+                odoo, attendance_id, target_emp_id, allocations, hourly_rate
             )
             flash('Time allocated successfully.', 'success')
             return redirect(url_for('timeclock.allocate_list'))
@@ -261,20 +312,15 @@ def allocate(attendance_id):
             flash(str(e), 'danger')
 
     # GET: load the attendance record, existing allocations, and job list
-    attendance = None
+    attendance = att_check
     existing = []
     jobs = []
     employee = None
 
     try:
-        employee = services.get_employee(odoo, employee_id)
-        attendance = services.get_attendance_record(odoo, attendance_id)
-        if not attendance:
-            flash('Attendance record not found.', 'warning')
-            return redirect(url_for('timeclock.allocate_list'))
-
+        employee = services.get_employee(odoo, target_emp_id)
         existing = services.get_allocations_for_attendance(
-            odoo, attendance_id, employee_id, attendance['check_in_dt']
+            odoo, attendance_id, target_emp_id, attendance['check_in_dt']
         )
         jobs = services.get_jobs_for_allocation(odoo)
     except OdooConnectionError as e:
