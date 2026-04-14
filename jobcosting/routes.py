@@ -269,3 +269,55 @@ def api_project_account(project_id):
         return jsonify({'account_id': None, 'account_name': None})
     except (OdooConnectionError, OdooAPIError) as e:
         return jsonify({'error': str(e)}), 503
+
+
+# ---------------------------------------------------------------------------
+# Custom Job Costing views (analytic-account-centric)
+# ---------------------------------------------------------------------------
+
+@bp.route('/jobs')
+def jobs_dashboard():
+    """Spreadsheet-style dashboard of all jobs (analytic accounts) with custom fields."""
+    odoo = current_app.odoo
+
+    data = {'columns': [], 'jobs': []}
+    try:
+        data = services.get_job_dashboard_data(odoo)
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+    except Exception as e:
+        flash(f'Error loading jobs: {e}', 'danger')
+        current_app.logger.exception('Error in jobs_dashboard')
+
+    return render_template(
+        'jobcosting/jobs_dashboard.html',
+        columns=data['columns'],
+        jobs=data['jobs'],
+    )
+
+
+@bp.route('/job/<int:account_id>')
+def job_detail(account_id):
+    """Full detail page for a single job (analytic account)."""
+    odoo = current_app.odoo
+
+    detail = None
+    try:
+        detail = services.get_job_detail(odoo, account_id)
+        if not detail:
+            flash('Job not found.', 'warning')
+            return redirect(url_for('jobcosting.jobs_dashboard'))
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+    except Exception as e:
+        flash(f'Error loading job: {e}', 'danger')
+        current_app.logger.exception('Error in job_detail')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    return render_template('jobcosting/job_detail.html', detail=detail)

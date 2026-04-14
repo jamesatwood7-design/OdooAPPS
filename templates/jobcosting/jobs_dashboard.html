@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs Dashboard - Job Costing{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-table"></i> Jobs Dashboard</h2>
+    <div>
+        <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-grid"></i> Projects View
+        </a>
+        <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> New Entry
+        </a>
+    </div>
+</div>
+
+<!-- Search Bar -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" id="jobSearch" class="form-control"
+                           placeholder="Search jobs by name, code, customer...">
+                </div>
+            </div>
+            <div class="col-md-6 text-end">
+                <small class="text-muted">
+                    <span id="jobCount">{{ jobs|length }}</span> jobs
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if jobs %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped table-hover job-table" id="jobsTable">
+        <thead class="table-dark sticky-top">
+            <tr>
+                {% for label, sort_type in columns %}
+                <th class="sortable" data-sort-type="{{ sort_type }}" data-col-index="{{ loop.index0 }}">
+                    {{ label }}
+                    <span class="sort-icon"></span>
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                {% for cell in job.cells %}
+                <td data-sort-val="{{ cell.raw }}"
+                    {% if cell.sort_type == 'currency' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
+                    {% if cell.sort_type == 'percent' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
+                    {% if cell.sort_type == 'percent' and cell.raw and cell.raw > 0 %}class="text-success"{% endif %}>
+                    {% if loop.index0 == 1 %}
+                        <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}" class="text-decoration-none fw-semibold">
+                            {{ cell.display }}
+                        </a>
+                    {% elif cell.sort_type == 'currency' and cell.display %}
+                        ${{ cell.display }}
+                    {% elif cell.sort_type == 'percent' and cell.display %}
+                        {{ cell.display }}%
+                    {% elif cell.sort_type == 'date' and not cell.display %}
+                        <span class="badge bg-info text-dark">In Progress</span>
+                    {% else %}
+                        {{ cell.display }}
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No jobs found. Make sure your Odoo instance has analytic accounts configured.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/jobs_dashboard.js') }}"></script>
+{% endblock %}

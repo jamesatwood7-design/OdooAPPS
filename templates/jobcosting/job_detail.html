@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}{{ detail.account.code or '' }} {{ detail.account.name }} - Job Detail{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>
+            {% if detail.account.code %}
+                <span class="text-muted">{{ detail.account.code }}</span> -
+            {% endif %}
+            {{ detail.account.name }}
+        </h2>
+    </div>
+    <div>
+        <a href="{{ url_for('jobcosting.create_entry') }}?account_id={{ detail.account.id }}"
+           class="btn btn-primary me-2">
+            <i class="bi bi-plus-circle"></i> Add Entry
+        </a>
+        <a href="{{ url_for('jobcosting.jobs_dashboard') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Jobs
+        </a>
+    </div>
+</div>
+
+<!-- Dynamic Sections -->
+{% for section in detail.sections %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            {% if section.name == 'Job Information' %}
+                <i class="bi bi-building"></i>
+            {% elif section.name == 'Revenue & Pricing' %}
+                <i class="bi bi-currency-dollar"></i>
+            {% elif section.name == 'Change Orders' %}
+                <i class="bi bi-pencil-square"></i>
+            {% elif section.name == 'Expenses & Margins' %}
+                <i class="bi bi-graph-down"></i>
+            {% elif section.name == 'Commissions' %}
+                <i class="bi bi-person-badge"></i>
+            {% endif %}
+            {{ section.name }}
+        </h5>
+    </div>
+    <div class="card-body">
+        {% if section.name == 'Expenses & Margins' or section.name == 'Revenue & Pricing' %}
+        <!-- Financial sections: metric cards layout -->
+        <div class="row g-3">
+            {% for field in section.fields %}
+            <div class="col-md-4 col-lg-3">
+                <div class="card text-center h-100 border-0 bg-light">
+                    <div class="card-body py-2 px-3">
+                        <small class="text-muted d-block">{{ field.label }}</small>
+                        <strong class="{% if field.type in ('float', 'monetary') %}fs-5{% endif %}
+                                      {% if 'margin' in field.label|lower and '-' in field.value %}text-danger{% endif %}
+                                      {% if 'profit' in field.label|lower and '-' not in field.value and field.value != '0.00' %}text-success{% endif %}">
+                            {% if field.type in ('float', 'monetary') and field.value %}
+                                ${{ field.value }}
+                            {% elif 'margin' in field.label|lower and '%' not in field.value and field.type == 'float' %}
+                                {{ field.value }}%
+                            {% else %}
+                                {{ field.value }}
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <!-- Other sections: definition list layout -->
+        <div class="row">
+            {% for field in section.fields %}
+            <div class="col-md-6 mb-2">
+                <div class="d-flex justify-content-between border-bottom pb-1">
+                    <span class="text-muted">{{ field.label }}</span>
+                    <strong>
+                        {% if field.type in ('float', 'monetary') and field.value %}
+                            ${{ field.value }}
+                        {% else %}
+                            {{ field.value }}
+                        {% endif %}
+                    </strong>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+<!-- Customer Invoices -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-receipt"></i> Customer Invoices</h5>
+        <span class="badge bg-primary">{{ detail.invoices|length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if detail.invoices %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Customer</th>
+                        <th>Date</th>
+                        <th class="text-end">Total</th>
+                        <th class="text-end">Amount Due</th>
+                        <th>Payment</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in detail.invoices %}
+                    <tr>
+                        <td><strong>{{ inv.name or '-' }}</strong></td>
+                        <td>{{ inv.partner_name }}</td>
+                        <td>{{ inv.display_date }}</td>
+                        <td class="text-end">${{ '%.2f'|format(inv.amount_total or 0) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(inv.amount_residual or 0) }}</td>
+                        <td>
+                            {% if inv.payment_state == 'paid' %}
+                                <span class="badge bg-success">Paid</span>
+                            {% elif inv.payment_state == 'partial' %}
+                                <span class="badge bg-warning text-dark">Partial</span>
+                            {% elif inv.payment_state == 'not_paid' %}
+                                <span class="badge bg-danger">Unpaid</span>
+                            {% elif inv.payment_state == 'in_payment' %}
+                                <span class="badge bg-info">In Payment</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ inv.payment_state or '-' }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if inv.state == 'posted' %}
+                                <span class="badge bg-success">Posted</span>
+                            {% elif inv.state == 'draft' %}
+                                <span class="badge bg-secondary">Draft</span>
+                            {% elif inv.state == 'cancel' %}
+                                <span class="badge bg-dark">Cancelled</span>
+                            {% else %}
+                                {{ inv.state or '-' }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center p-3 mb-0">No invoices found for this job.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Vendor Bills -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Vendor Bills</h5>
+        <span class="badge bg-warning text-dark">{{ detail.bills|length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if detail.bills %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Bill #</th>
+                        <th>Vendor</th>
+                        <th>Date</th>
+                        <th class="text-end">Total</th>
+                        <th class="text-end">Amount Due</th>
+                        <th>Payment</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bill in detail.bills %}
+                    <tr>
+                        <td><strong>{{ bill.name or '-' }}</strong></td>
+                        <td>{{ bill.partner_name }}</td>
+                        <td>{{ bill.display_date }}</td>
+                        <td class="text-end">${{ '%.2f'|format(bill.amount_total or 0) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(bill.amount_residual or 0) }}</td>
+                        <td>
+                            {% if bill.payment_state == 'paid' %}
+                                <span class="badge bg-success">Paid</span>
+                            {% elif bill.payment_state == 'partial' %}
+                                <span class="badge bg-warning text-dark">Partial</span>
+                            {% elif bill.payment_state == 'not_paid' %}
+                                <span class="badge bg-danger">Unpaid</span>
+                            {% elif bill.payment_state == 'in_payment' %}
+                                <span class="badge bg-info">In Payment</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ bill.payment_state or '-' }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if bill.state == 'posted' %}
+                                <span class="badge bg-success">Posted</span>
+                            {% elif bill.state == 'draft' %}
+                                <span class="badge bg-secondary">Draft</span>
+                            {% elif bill.state == 'cancel' %}
+                                <span class="badge bg-dark">Cancelled</span>
+                            {% else %}
+                                {{ bill.state or '-' }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center p-3 mb-0">No vendor bills found for this job.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Analytic Line Items -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-journal-text"></i> Analytic Line Items</h5>
+        <a href="{{ url_for('jobcosting.entries', account_id=detail.account.id) }}"
+           class="btn btn-sm btn-outline-primary">View All</a>
+    </div>
+    <div class="card-body p-0">
+        {% if detail.lines %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Employee</th>
+                        <th class="text-end">Hours</th>
+                        <th class="text-end">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for line in detail.lines %}
+                    <tr>
+                        <td>{{ line.date }}</td>
+                        <td>{{ line.name[:50] }}{% if line.name|length > 50 %}...{% endif %}</td>
+                        <td>
+                            {% if line.employee_id %}
+                                {{ line.employee_id[1] if line.employee_id is iterable and line.employee_id is not string else line.employee_id }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ line.unit_amount_fmt }}</td>
+                        <td class="text-end">${{ '%.2f'|format((line.amount or 0)|abs) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center p-3 mb-0">No analytic entries yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

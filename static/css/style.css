@@ -69,6 +69,39 @@
     font-weight: 600;
 }
 
+/* Jobs Dashboard Table */
+.job-table {
+    font-size: 0.85rem;
+}
+
+.job-table td,
+.job-table th {
+    padding: 0.35rem 0.5rem;
+    vertical-align: middle;
+}
+
+.job-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    user-select: none;
+}
+
+.job-table th.sortable:hover {
+    background-color: #495057;
+    cursor: pointer;
+}
+
+.job-table th.sort-asc .sort-icon::after {
+    content: ' \25B2';
+    font-size: 0.7rem;
+}
+
+.job-table th.sort-desc .sort-icon::after {
+    content: ' \25BC';
+    font-size: 0.7rem;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .elapsed-time {

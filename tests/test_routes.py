@@ -143,3 +143,44 @@ class TestJobcostingRoutes:
         data = resp.get_json()
         assert len(data) == 1
         assert data[0]['name'] == 'Task 1'
+
+
+class TestJobsRoutes:
+    def test_jobs_dashboard_loads(self, client, mock_odoo):
+        mock_odoo.fields_get.return_value = {
+            'id': {'string': 'ID', 'type': 'integer'},
+            'name': {'string': 'Name', 'type': 'char'},
+            'code': {'string': 'Code', 'type': 'char'},
+        }
+        mock_odoo.search_read.return_value = [
+            {'id': 1, 'name': 'Test Job', 'code': 'S001'},
+        ]
+
+        resp = client.get('/jobcosting/jobs')
+        assert resp.status_code == 200
+        assert b'Jobs Dashboard' in resp.data
+
+    def test_job_detail_loads(self, client, mock_odoo):
+        mock_odoo.fields_get.return_value = {
+            'id': {'string': 'ID', 'type': 'integer'},
+            'name': {'string': 'Name', 'type': 'char'},
+            'code': {'string': 'Code', 'type': 'char'},
+        }
+        mock_odoo.search_read.return_value = [
+            {'id': 1, 'name': 'Test Job', 'code': 'S001'},
+        ]
+        mock_odoo.safe_search_read.return_value = [
+            {'id': 1, 'name': 'Test Job', 'code': 'S001'},
+        ]
+
+        resp = client.get('/jobcosting/job/1')
+        assert resp.status_code == 200
+        assert b'Test Job' in resp.data
+
+    def test_job_detail_not_found(self, client, mock_odoo):
+        mock_odoo.fields_get.return_value = {}
+        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
+
+        resp = client.get('/jobcosting/job/999', follow_redirects=False)
+        assert resp.status_code == 302

@@ -51,3 +51,22 @@ def get_day_boundaries(date):
     start = datetime.combine(date, datetime.min.time())
     end = datetime.combine(date, datetime.max.time())
     return datetime_to_odoo(start), datetime_to_odoo(end)
+
+
+def format_currency(value):
+    """Format a numeric value as currency: $X,XXX.XX."""
+    if value is None or value is False:
+        return '$0.00'
+    try:
+        return f'${float(value):,.2f}'
+    except (ValueError, TypeError):
+        return '$0.00'
+
+
+def format_many2one(value):
+    """Extract display name from an Odoo Many2one [id, name] tuple."""
+    if not value:
+        return '-'
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return str(value[1])
+    return str(value)
