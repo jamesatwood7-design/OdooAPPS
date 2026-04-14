@@ -25,8 +25,11 @@ class OdooClient:
     def _make_proxy(self, endpoint):
         """Create a fresh ServerProxy for the given endpoint."""
         try:
+            transport = xmlrpc.client.SafeTransport() if self.url.startswith('https') else None
             return xmlrpc.client.ServerProxy(
-                f'{self.url}/xmlrpc/2/{endpoint}', allow_none=True
+                f'{self.url}/xmlrpc/2/{endpoint}',
+                allow_none=True,
+                transport=transport,
             )
         except Exception as e:
             raise OdooConnectionError(f'Cannot connect to Odoo at {self.url}: {e}')

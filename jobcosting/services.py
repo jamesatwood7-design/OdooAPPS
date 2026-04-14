@@ -279,32 +279,60 @@ def get_job_cost_report(odoo, project_id):
 
 
 def get_cost_summary_by_project(odoo):
-    """Summary across all projects: total budgeted, actual, variance."""
+    """Summary across all projects using batch queries.
+
+    Uses only 3 API calls total (projects + task hours grouped + costs grouped)
+    instead of 2 calls per project, which was causing timeouts on cloud Odoo.
+    """
     projects = get_projects(odoo)
+    if not projects:
+        return []
+
+    project_ids = [p['id'] for p in projects]
+
+    # Batch: get planned + effective hours grouped by project (1 API call)
+    hours_by_project = {}
+    try:
+        task_groups = odoo.read_group(
+            'project.task',
+            [('project_id', 'in', project_ids)],
+            ['project_id', 'planned_hours', 'effective_hours'],
+            ['project_id'],
+        )
+        for g in task_groups:
+            proj_val = g.get('project_id')
+            proj_id = proj_val[0] if isinstance(proj_val, (list, tuple)) else proj_val
+            hours_by_project[proj_id] = {
+                'budgeted': g.get('planned_hours', 0) or 0,
+                'actual': g.get('effective_hours', 0) or 0,
+            }
+    except Exception:
+        pass
+
+    # Batch: get total cost grouped by project (1 API call)
+    cost_by_project = {}
+    try:
+        cost_groups = odoo.read_group(
+            'account.analytic.line',
+            [('project_id', 'in', project_ids)],
+            ['project_id', 'amount'],
+            ['project_id'],
+        )
+        for g in cost_groups:
+            proj_val = g.get('project_id')
+            proj_id = proj_val[0] if isinstance(proj_val, (list, tuple)) else proj_val
+            cost_by_project[proj_id] = abs(g.get('amount', 0) or 0)
+    except Exception:
+        pass
+
     summaries = []
-
     for proj in projects:
-        try:
-            tasks = get_tasks_for_project(odoo, proj['id'])
-            budgeted = sum(t.get('planned_hours', 0) or 0 for t in tasks)
-            actual = sum(t.get('effective_hours', 0) or 0 for t in tasks)
-        except Exception:
-            budgeted = 0
-            actual = 0
-
-        # Get total cost from analytic lines
-        try:
-            grouped = odoo.read_group(
-                'account.analytic.line',
-                [('project_id', '=', proj['id'])],
-                ['amount'],
-                [],
-            )
-            total_cost = abs(grouped[0].get('amount', 0) or 0) if grouped else 0
-        except Exception:
-            total_cost = 0
-
+        hours = hours_by_project.get(proj['id'], {})
+        budgeted = hours.get('budgeted', 0)
+        actual = hours.get('actual', 0)
+        total_cost = cost_by_project.get(proj['id'], 0)
         variance = budgeted - actual
+
         summaries.append({
             'project': proj,
             'budgeted_hours': budgeted,
