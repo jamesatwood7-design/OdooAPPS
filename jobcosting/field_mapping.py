@@ -69,10 +69,6 @@ DETAIL_SECTIONS = [
         ('Actual Profit', 'Actual Profit', 'currency'),
         ('Projected Profit', 'Projected Profit', 'currency'),
     ]),
-    ('Commissions', [
-        ('Commission Check', 'Commission Check', 'currency'),
-        ('Commission Paid', 'Commission Paid', 'currency'),
-    ]),
 ]
 
 

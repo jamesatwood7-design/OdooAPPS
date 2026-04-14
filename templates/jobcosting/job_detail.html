@@ -141,11 +141,14 @@
 
 <div class="tab-content border border-top-0 rounded-bottom bg-white">
     <!-- DETAILS TAB -->
+    {% set f = detail.financials %}
     <div class="tab-pane fade show active p-4" id="tabDetails">
         <div class="row g-4">
-            {% for section in detail.sections %}
-                {% if section.name == 'Job Information' %}
-                <div class="col-md-6">
+
+            <!-- Left: Job Information -->
+            <div class="col-md-5">
+                {% for section in detail.sections %}
+                    {% if section.name == 'Job Information' %}
                     <h6 class="text-uppercase text-muted border-bottom pb-2 mb-3">
                         <i class="bi bi-building"></i> Job Information
                     </h6>
@@ -159,45 +162,148 @@
                         </span>
                     </div>
                     {% endfor %}
+                    {% endif %}
+                {% endfor %}
+
+                <!-- Job Duration (computed) -->
+                {% set started = None %}
+                {% set completed = None %}
+                {% for section in detail.sections %}
+                    {% if section.name == 'Job Information' %}
+                        {% for field in section.fields %}
+                            {% if field.label == 'Date Started' and field.value and field.value != '-' %}
+                                {% set started = field.value %}
+                            {% endif %}
+                            {% if field.label == 'Date Completed' and field.value and field.value != '-' %}
+                                {% set completed = field.value %}
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
+                {% endfor %}
+                {% if started %}
+                <div class="d-flex justify-content-between py-1">
+                    <span class="text-muted">Status</span>
+                    <span>
+                        {% if completed %}
+                            <span class="badge bg-success">Completed</span>
+                        {% else %}
+                            <span class="badge bg-primary">In Progress</span>
+                        {% endif %}
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Right: Visual Summary -->
+            <div class="col-md-7">
+                <!-- Contract Breakdown -->
+                <h6 class="text-uppercase text-muted border-bottom pb-2 mb-3">
+                    <i class="bi bi-pie-chart"></i> Contract Overview
+                </h6>
+
+                <!-- Progress: Billed vs Contract -->
+                {% if f.total_contract > 0 %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="text-muted">Billed vs Contract Value</small>
+                        <small class="fw-bold">
+                            ${{ '{:,.0f}'.format(f.net_invoiced) }} / ${{ '{:,.0f}'.format(f.total_contract) }}
+                        </small>
+                    </div>
+                    {% set billed_pct = (f.net_invoiced / f.total_contract * 100) if f.total_contract > 0 else 0 %}
+                    {% if billed_pct > 100 %}{% set billed_pct = 100 %}{% endif %}
+                    <div class="progress" style="height: 24px;">
+                        <div class="progress-bar bg-success" style="width: {{ billed_pct }}%">
+                            {{ '{:.0f}'.format(billed_pct) }}% Billed
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress: Costs vs Contract -->
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="text-muted">Costs vs Contract Value</small>
+                        <small class="fw-bold">
+                            ${{ '{:,.0f}'.format(f.total_costs) }} / ${{ '{:,.0f}'.format(f.total_contract) }}
+                        </small>
+                    </div>
+                    {% set cost_pct = (f.total_costs / f.total_contract * 100) if f.total_contract > 0 else 0 %}
+                    {% if cost_pct > 100 %}{% set cost_pct_display = 100 %}{% else %}{% set cost_pct_display = cost_pct %}{% endif %}
+                    <div class="progress" style="height: 24px;">
+                        <div class="progress-bar {% if cost_pct > 90 %}bg-danger{% elif cost_pct > 70 %}bg-warning{% else %}bg-info{% endif %}"
+                             style="width: {{ cost_pct_display }}%">
+                            {{ '{:.0f}'.format(cost_pct) }}% Spent
+                        </div>
+                    </div>
                 </div>
                 {% endif %}
 
-                {% if section.name == 'Change Orders' %}
-                <div class="col-md-6">
-                    <h6 class="text-uppercase text-muted border-bottom pb-2 mb-3">
-                        <i class="bi bi-pencil-square"></i> Change Orders
-                    </h6>
-                    {% for field in section.fields %}
-                    <div class="d-flex justify-content-between py-1">
-                        <span class="text-muted">{{ field.label }}</span>
-                        <span class="editable-field fw-semibold" data-field="{{ field.technical_name }}"
-                              data-format="{{ field.display_format }}" data-type="{{ field.type }}">
-                            {% if field.display_format == 'currency' and field.value %}${{ field.value }}
-                            {% else %}{{ field.value or '-' }}{% endif %}
-                        </span>
-                    </div>
-                    {% endfor %}
-                </div>
+                <!-- Change Orders (from Sales Orders) -->
+                <h6 class="text-uppercase text-muted border-bottom pb-2 mb-3 mt-4">
+                    <i class="bi bi-pencil-square"></i> Contract & Change Orders
+                </h6>
+                {% if f.sales_orders %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        {% for so in f.sales_orders %}
+                        <tr>
+                            <td>
+                                {% if loop.index == 1 %}
+                                    <span class="badge bg-primary me-1">Original</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark me-1">CO #{{ loop.index - 1 }}</span>
+                                {% endif %}
+                                {{ so.name }}
+                            </td>
+                            <td class="text-muted">{{ so.display_date }}</td>
+                            <td class="text-end fw-bold">${{ '{:,.2f}'.format(so.amount_total or 0) }}</td>
+                            <td>
+                                {% if so.state == 'sale' %}<span class="badge bg-success">Confirmed</span>
+                                {% elif so.state == 'done' %}<span class="badge bg-primary">Done</span>
+                                {% elif so.state == 'draft' %}<span class="badge bg-secondary">Quote</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <tr style="border-top: 2px solid #000;">
+                            <td class="fw-bold" colspan="2">Total Contract Value</td>
+                            <td class="text-end fw-bold fs-6">${{ '{:,.2f}'.format(f.total_contract) }}</td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">No Sales Orders linked to this job.</p>
                 {% endif %}
 
-                {% if section.name == 'Commissions' %}
-                <div class="col-md-6">
-                    <h6 class="text-uppercase text-muted border-bottom pb-2 mb-3">
-                        <i class="bi bi-person-badge"></i> Commissions
-                    </h6>
-                    {% for field in section.fields %}
-                    <div class="d-flex justify-content-between py-1">
-                        <span class="text-muted">{{ field.label }}</span>
-                        <span class="editable-field fw-semibold" data-field="{{ field.technical_name }}"
-                              data-format="{{ field.display_format }}" data-type="{{ field.type }}">
-                            {% if field.display_format == 'currency' and field.value %}${{ field.value }}
-                            {% else %}{{ field.value or '-' }}{% endif %}
-                        </span>
+                <!-- Quick Stats -->
+                <div class="row g-2 mt-3">
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center">
+                            <div class="card-body py-2">
+                                <small class="text-muted d-block">Labor Hours</small>
+                                <strong>{{ f.labor_hours_fmt }}</strong>
+                            </div>
+                        </div>
                     </div>
-                    {% endfor %}
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center">
+                            <div class="card-body py-2">
+                                <small class="text-muted d-block">Purchase Orders</small>
+                                <strong>{{ f.purchase_orders|length }}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center">
+                            <div class="card-body py-2">
+                                <small class="text-muted d-block">Vendor Bills</small>
+                                <strong>{{ f.bills|length }}</strong>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                {% endif %}
-            {% endfor %}
+            </div>
         </div>
     </div>
 
