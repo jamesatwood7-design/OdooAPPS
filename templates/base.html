@@ -28,10 +28,29 @@
                     </li>
                     {% if session.get('auth_type') == 'odoo_user' %}
                     <li class="nav-item">
-                        <a class="nav-link {% if request.path.startswith('/jobcosting') %}active{% endif %}"
+                        <a class="nav-link {% if request.path == '/jobcosting/jobs' %}active{% endif %}"
                            href="{{ url_for('jobcosting.jobs_dashboard') }}">
                             <i class="bi bi-briefcase"></i> Jobs
                         </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle {% if request.path in ('/jobcosting/profitability', '/jobcosting/employee-costs', '/jobcosting/wip', '/jobcosting/compare') %}active{% endif %}"
+                           href="#" data-bs-toggle="dropdown">
+                            <i class="bi bi-bar-chart-line"></i> Reports
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('jobcosting.profitability') }}">
+                                <i class="bi bi-graph-up-arrow"></i> Profitability</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('jobcosting.employee_costs') }}">
+                                <i class="bi bi-people"></i> Employee Costs</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('jobcosting.wip_report') }}">
+                                <i class="bi bi-clipboard-data"></i> WIP Report</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('jobcosting.compare_jobs') }}">
+                                <i class="bi bi-arrow-left-right"></i> Job Comparison</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('jobcosting.export_data', report_type='csv') }}">
+                                <i class="bi bi-download"></i> Export Jobs CSV</a></li>
+                        </ul>
                     </li>
                     {% endif %}
                 </ul>

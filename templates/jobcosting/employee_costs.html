@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Cost Report{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-people"></i> Employee Cost Report</h2>
+    <a href="{{ url_for('jobcosting.jobs_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Jobs
+    </a>
+</div>
+
+<!-- Date Range Filter -->
+<div class="card mb-4">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">From</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to or '' }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-funnel"></i> Filter
+                </button>
+            </div>
+            <div class="col-md-4 text-end">
+                <strong>{{ data.employee_count }}</strong> employees |
+                <strong>{{ data.total_hours_fmt }}</strong> total hours |
+                <strong>${{ '{:,.2f}'.format(data.total_cost) }}</strong> total cost
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if data.employees %}
+<!-- Employee Table -->
+{% for emp in data.employees %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-person"></i> {{ emp.name }}</h6>
+        <div>
+            <span class="badge bg-primary">{{ emp.hours_fmt }}</span>
+            <span class="badge bg-secondary">${{ '{:,.2f}'.format(emp.cost) }}</span>
+        </div>
+    </div>
+    {% if emp.jobs %}
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Job</th>
+                        <th class="text-end">Hours</th>
+                        <th class="text-end">Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in emp.jobs %}
+                    <tr>
+                        <td>{{ job.name }}</td>
+                        <td class="text-end">{{ job.hours_fmt }}</td>
+                        <td class="text-end">${{ '{:,.2f}'.format(job.cost) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No employee data found for the selected date range.
+</div>
+{% endif %}
+{% endblock %}

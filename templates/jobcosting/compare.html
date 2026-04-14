@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Job Comparison{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-arrow-left-right"></i> Job Comparison</h2>
+    <a href="{{ url_for('jobcosting.jobs_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Jobs
+    </a>
+</div>
+
+<!-- Job Selector -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Job 1</label>
+                <select name="job1" class="form-select" id="job1">
+                    <option value="">-- Select Job --</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct.id }}" {% if acct.id in selected_ids %}selected{% endif %}>
+                        {% if acct.code %}[{{ acct.code }}] {% endif %}{{ acct.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Job 2</label>
+                <select name="job2" class="form-select" id="job2">
+                    <option value="">-- Select Job --</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct.id }}" {% if selected_ids|length > 1 and acct.id == selected_ids[1] %}selected{% endif %}>
+                        {% if acct.code %}[{{ acct.code }}] {% endif %}{{ acct.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Job 3 (optional)</label>
+                <select name="job3" class="form-select" id="job3">
+                    <option value="">-- Select Job --</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct.id }}" {% if selected_ids|length > 2 and acct.id == selected_ids[2] %}selected{% endif %}>
+                        {% if acct.code %}[{{ acct.code }}] {% endif %}{{ acct.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary w-100" onclick="buildUrl(event)">
+                    <i class="bi bi-arrow-left-right"></i> Compare
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if data and data.jobs %}
+<!-- Comparison Table -->
+<div class="card">
+    <div class="card-header">
+        <div class="row">
+            <div class="col-4"><strong>Metric</strong></div>
+            {% for job in data.jobs %}
+            <div class="col text-center">
+                <strong>
+                    <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}">
+                        {{ job.code or job.name }}
+                    </a>
+                </strong>
+                <br><small class="text-muted">{{ job.name }}</small>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="card-body p-0">
+        {% for row in data.rows %}
+        <div class="row border-bottom py-2 px-3 {% if loop.index is odd %}bg-light{% endif %}">
+            <div class="col-4 text-muted">{{ row.label }}</div>
+            {% for val in row.values %}
+            <div class="col text-center">
+                {% if 'Price' in row.label or 'Cost' in row.label or 'Margin' in row.label or 'Profit' in row.label or 'Expenses' in row.label or 'per Sq' in row.label %}
+                    <strong>${{ val.display }}</strong>
+                {% elif '%' in row.label %}
+                    <strong>{{ val.display }}%</strong>
+                {% else %}
+                    <strong>{{ val.display }}</strong>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% elif not selected_ids %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Select 2 or 3 jobs above to compare them side by side.
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function buildUrl(e) {
+    e.preventDefault();
+    var ids = [];
+    ['job1', 'job2', 'job3'].forEach(function(name) {
+        var val = document.getElementById(name).value;
+        if (val) ids.push(val);
+    });
+    if (ids.length < 2) {
+        alert('Please select at least 2 jobs to compare.');
+        return;
+    }
+    window.location.href = '{{ url_for("jobcosting.compare_jobs") }}?jobs=' + ids.join(',');
+}
+</script>
+{% endblock %}

@@ -1,12 +1,13 @@
-from datetime import date
+from datetime import date, timedelta
 from flask import (
     render_template, redirect, url_for, flash, request,
-    jsonify, current_app,
+    jsonify, current_app, make_response,
 )
 from jobcosting import bp
 from jobcosting import services
 from common.exceptions import OdooAPIError, OdooConnectionError
 from auth.routes import odoo_user_required
+from jobcosting import reports
 
 
 @bp.route('/')
@@ -233,3 +234,159 @@ def job_save(account_id):
         return jsonify({'error': str(e)}), 400
     except (OdooConnectionError, Exception) as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Financial Reports
+# ---------------------------------------------------------------------------
+
+@bp.route('/profitability')
+@odoo_user_required
+def profitability():
+    """Profitability dashboard with charts."""
+    odoo = current_app.odoo
+
+    data = {'jobs': [], 'totals': {}, 'top_by_revenue': [], 'problem_jobs': []}
+    try:
+        data = reports.get_profitability_data(odoo)
+    except Exception as e:
+        flash(f'Error loading profitability data: {e}', 'danger')
+        current_app.logger.exception('Error in profitability')
+
+    return render_template('jobcosting/profitability.html', data=data)
+
+
+@bp.route('/employee-costs')
+@odoo_user_required
+def employee_costs():
+    """Employee cost report with date range."""
+    odoo = current_app.odoo
+
+    date_from_str = request.args.get('date_from', '')
+    date_to_str = request.args.get('date_to', '')
+
+    date_from = None
+    date_to = None
+
+    if date_from_str:
+        try:
+            date_from = date_from_str
+        except ValueError:
+            pass
+    if date_to_str:
+        try:
+            date_to = date_to_str
+        except ValueError:
+            pass
+
+    if not date_from and not date_to:
+        today = date.today()
+        date_from = (today - timedelta(days=30)).isoformat()
+        date_to = today.isoformat()
+
+    data = {'employees': [], 'total_hours': 0, 'total_cost': 0}
+    try:
+        data = reports.get_employee_cost_data(odoo, date_from, date_to)
+    except Exception as e:
+        flash(f'Error loading employee cost data: {e}', 'danger')
+        current_app.logger.exception('Error in employee_costs')
+
+    return render_template(
+        'jobcosting/employee_costs.html',
+        data=data,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@bp.route('/wip')
+@odoo_user_required
+def wip_report():
+    """Work in Progress report."""
+    odoo = current_app.odoo
+
+    data = {'jobs': [], 'totals': {}}
+    try:
+        data = reports.get_wip_data(odoo)
+    except Exception as e:
+        flash(f'Error loading WIP data: {e}', 'danger')
+        current_app.logger.exception('Error in wip_report')
+
+    return render_template('jobcosting/wip.html', data=data)
+
+
+@bp.route('/compare')
+@odoo_user_required
+def compare_jobs():
+    """Compare 2-3 jobs side by side."""
+    odoo = current_app.odoo
+
+    job_ids_str = request.args.get('jobs', '')
+    job_ids = [int(x) for x in job_ids_str.split(',') if x.strip().isdigit()]
+
+    all_accounts = []
+    data = None
+
+    try:
+        all_accounts = odoo.search_read(
+            'account.analytic.account', [],
+            fields=['id', 'name', 'code'],
+            order='code asc',
+        )
+        if job_ids:
+            data = reports.get_job_comparison_data(odoo, job_ids)
+    except Exception as e:
+        flash(f'Error: {e}', 'danger')
+
+    return render_template(
+        'jobcosting/compare.html',
+        accounts=all_accounts,
+        data=data,
+        selected_ids=job_ids,
+    )
+
+
+@bp.route('/export/<report_type>')
+@odoo_user_required
+def export_data(report_type):
+    """Export jobs data as CSV."""
+    odoo = current_app.odoo
+
+    try:
+        data = services.get_job_dashboard_data(odoo)
+        jobs = data.get('jobs', [])
+        columns = data.get('columns', [])
+
+        if report_type == 'csv':
+            import csv
+            import io
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Header
+            writer.writerow([c[0] for c in columns])
+
+            # Rows
+            for job in jobs:
+                row = []
+                for cell in job['cells']:
+                    val = cell['display']
+                    if cell['sort_type'] == 'currency' and val:
+                        val = f'${val}'
+                    elif cell['sort_type'] == 'percent' and val:
+                        val = f'{val}%'
+                    row.append(val)
+                writer.writerow(row)
+
+            resp = make_response(output.getvalue())
+            resp.headers['Content-Type'] = 'text/csv'
+            resp.headers['Content-Disposition'] = 'attachment; filename=jobs_export.csv'
+            return resp
+
+        else:
+            flash('Unsupported export format.', 'warning')
+            return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    except Exception as e:
+        flash(f'Export error: {e}', 'danger')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
