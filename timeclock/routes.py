@@ -343,3 +343,49 @@ def allocate(attendance_id):
         allocated_hours=allocated_hours,
         remaining_hours=max(0, total_hours - allocated_hours),
     )
+
+
+# ---------------------------------------------------------------------------
+# Kiosk Mode (PIN + Photo, no auth required)
+# ---------------------------------------------------------------------------
+
+@bp.route('/kiosk')
+def kiosk():
+    """Kiosk mode - full screen clock in/out with PIN and photo."""
+    return render_template('timeclock/kiosk.html')
+
+
+@bp.route('/kiosk/clock', methods=['POST'])
+def kiosk_clock():
+    """Process a kiosk clock in/out via PIN + photo."""
+    odoo = current_app.odoo
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    pin = data.get('pin', '')
+    photo = data.get('photo', '')
+
+    if not pin:
+        return jsonify({'error': 'Please enter your PIN'}), 400
+
+    try:
+        employee = services.verify_pin(odoo, pin)
+        if not employee:
+            return jsonify({'error': 'Invalid PIN. Please try again.'}), 401
+
+        result = services.kiosk_clock(odoo, employee['id'], photo_base64=photo)
+        return jsonify({
+            'success': True,
+            'employee_name': result['employee_name'],
+            'action': result['action'],
+            'state': result['state'],
+        })
+
+    except OdooConnectionError as e:
+        return jsonify({'error': f'Cannot connect to Odoo: {e}'}), 503
+    except OdooAPIError as e:
+        return jsonify({'error': f'Error: {e}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Error: {e}'}), 500

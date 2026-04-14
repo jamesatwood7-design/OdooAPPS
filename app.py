@@ -5,7 +5,8 @@ from common.exceptions import OdooConnectionError, OdooAuthenticationError
 
 
 # Paths that don't require authentication
-PUBLIC_PATHS = {'/login', '/login/odoo', '/login/employee', '/logout', '/static'}
+PUBLIC_PATHS = {'/login', '/login/odoo', '/login/employee', '/logout', '/static',
+                '/timeclock/kiosk', '/timeclock/kiosk/clock'}
 
 
 def create_app(config_class=Config):

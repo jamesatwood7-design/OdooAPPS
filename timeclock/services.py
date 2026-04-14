@@ -421,3 +421,65 @@ def save_time_allocations(odoo, attendance_id, employee_id, allocations,
         created_ids.append(line_id)
 
     return created_ids
+
+
+# ---------------------------------------------------------------------------
+# Kiosk Mode (PIN + Photo)
+# ---------------------------------------------------------------------------
+
+def verify_pin(odoo, pin):
+    """Look up an employee by their PIN code.
+
+    Returns the employee record if found, None otherwise.
+    Uses Odoo's built-in 'pin' field on hr.employee.
+    """
+    if not pin or not pin.strip():
+        return None
+
+    records = odoo.safe_search_read(
+        'hr.employee',
+        [('pin', '=', pin.strip())],
+        fields=['id', 'name', 'attendance_state'],
+        limit=1,
+    )
+    return records[0] if records else None
+
+
+def kiosk_clock(odoo, employee_id, photo_base64=None):
+    """Toggle clock in/out for kiosk mode and optionally store a photo.
+
+    Returns dict with action taken and employee info.
+    """
+    status = get_attendance_status(odoo, employee_id)
+    action = 'in' if status['state'] == 'checked_out' else 'out'
+
+    # Toggle attendance
+    toggle_attendance(odoo, employee_id)
+
+    # Store photo as Odoo attachment if provided
+    if photo_base64:
+        try:
+            import base64
+            # Clean the base64 string (remove data:image/... prefix if present)
+            if ',' in photo_base64:
+                photo_base64 = photo_base64.split(',')[1]
+
+            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            filename = f'clock_{action}_{employee_id}_{timestamp}.jpg'
+
+            odoo.create('ir.attachment', {
+                'name': filename,
+                'type': 'binary',
+                'datas': photo_base64,
+                'res_model': 'hr.employee',
+                'res_id': employee_id,
+                'mimetype': 'image/jpeg',
+            })
+        except Exception:
+            pass  # Don't fail clock if photo storage fails
+
+    return {
+        'action': action,
+        'employee_name': status['employee']['name'] if status.get('employee') else '',
+        'state': 'checked_in' if action == 'in' else 'checked_out',
+    }

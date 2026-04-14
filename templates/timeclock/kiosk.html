@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Time Clock Kiosk</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        * { user-select: none; }
+        body { background: #1a1a2e; color: #fff; overflow: hidden; height: 100vh; }
+        .kiosk-container { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+        .clock-display { font-size: 3rem; font-weight: 300; color: #e0e0e0; margin-bottom: 1rem; }
+        .date-display { font-size: 1.1rem; color: #888; margin-bottom: 2rem; }
+
+        /* PIN Display */
+        .pin-display {
+            font-size: 2.5rem; letter-spacing: 15px; font-weight: bold;
+            color: #00d4ff; min-height: 60px; margin-bottom: 1rem;
+        }
+        .pin-dots { font-size: 3rem; }
+
+        /* Keypad */
+        .keypad { display: grid; grid-template-columns: repeat(3, 90px); gap: 10px; margin-bottom: 1.5rem; }
+        .key-btn {
+            width: 90px; height: 70px; font-size: 1.8rem; font-weight: 600;
+            border: 2px solid #333; border-radius: 12px; background: #16213e;
+            color: #fff; cursor: pointer; transition: all 0.15s;
+        }
+        .key-btn:hover, .key-btn:active { background: #0f3460; border-color: #00d4ff; }
+        .key-btn.clear { font-size: 1rem; color: #ff6b6b; border-color: #ff6b6b; }
+        .key-btn.enter { font-size: 1rem; color: #51cf66; border-color: #51cf66; background: #1a3a2a; }
+        .key-btn.enter:hover { background: #2a5a3a; }
+
+        /* Camera */
+        .camera-wrap {
+            position: relative; width: 320px; height: 240px;
+            border-radius: 12px; overflow: hidden; margin: 0 auto 1rem;
+            border: 3px solid #333;
+        }
+        .camera-wrap video, .camera-wrap canvas { width: 100%; height: 100%; object-fit: cover; }
+
+        /* Result */
+        .result-card {
+            text-align: center; padding: 2rem;
+            border-radius: 16px; margin: 1rem 0;
+        }
+        .result-card.clock-in { background: #1a3a2a; border: 2px solid #51cf66; }
+        .result-card.clock-out { background: #3a1a1a; border: 2px solid #ff6b6b; }
+        .result-name { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .result-action { font-size: 1.3rem; }
+
+        /* Status message */
+        .status-msg { min-height: 40px; font-size: 1.1rem; color: #ff6b6b; }
+
+        /* Responsive */
+        @media (max-width: 500px) {
+            .clock-display { font-size: 2rem; }
+            .keypad { grid-template-columns: repeat(3, 75px); gap: 8px; }
+            .key-btn { width: 75px; height: 60px; font-size: 1.5rem; }
+            .camera-wrap { width: 260px; height: 195px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="kiosk-container" id="mainScreen">
+        <!-- Clock -->
+        <div class="clock-display" id="clock">--:--:--</div>
+        <div class="date-display" id="dateDisplay"></div>
+
+        <h4 class="mb-3" style="color: #888;">Enter your PIN to clock in/out</h4>
+
+        <!-- PIN dots -->
+        <div class="pin-display">
+            <span class="pin-dots" id="pinDots"></span>
+        </div>
+
+        <!-- Status message -->
+        <div class="status-msg" id="statusMsg"></div>
+
+        <!-- Keypad -->
+        <div class="keypad">
+            <button class="key-btn" onclick="pressKey('1')">1</button>
+            <button class="key-btn" onclick="pressKey('2')">2</button>
+            <button class="key-btn" onclick="pressKey('3')">3</button>
+            <button class="key-btn" onclick="pressKey('4')">4</button>
+            <button class="key-btn" onclick="pressKey('5')">5</button>
+            <button class="key-btn" onclick="pressKey('6')">6</button>
+            <button class="key-btn" onclick="pressKey('7')">7</button>
+            <button class="key-btn" onclick="pressKey('8')">8</button>
+            <button class="key-btn" onclick="pressKey('9')">9</button>
+            <button class="key-btn clear" onclick="clearPin()">Clear</button>
+            <button class="key-btn" onclick="pressKey('0')">0</button>
+            <button class="key-btn enter" onclick="submitPin()">Enter</button>
+        </div>
+    </div>
+
+    <!-- Camera Screen (shown after PIN verified) -->
+    <div class="kiosk-container d-none" id="cameraScreen">
+        <h3 class="mb-3" id="cameraGreeting">Smile for the camera!</h3>
+        <div class="camera-wrap">
+            <video id="cameraVideo" autoplay playsinline muted></video>
+            <canvas id="cameraCanvas" class="d-none"></canvas>
+        </div>
+        <p class="text-muted mb-3">Photo will be taken automatically...</p>
+        <div class="spinner-border text-info" id="cameraSpinner"></div>
+    </div>
+
+    <!-- Result Screen -->
+    <div class="kiosk-container d-none" id="resultScreen">
+        <div class="result-card" id="resultCard">
+            <div class="result-name" id="resultName"></div>
+            <div class="result-action" id="resultAction"></div>
+            <div class="mt-3">
+                <i class="bi" id="resultIcon" style="font-size: 4rem;"></i>
+            </div>
+        </div>
+    </div>
+
+<script>
+var pin = '';
+var maxPinLength = 6;
+
+// --- Clock ---
+function updateClock() {
+    var now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    document.getElementById('dateDisplay').textContent = now.toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// --- Keypad ---
+function pressKey(digit) {
+    if (pin.length >= maxPinLength) return;
+    pin += digit;
+    updatePinDisplay();
+    document.getElementById('statusMsg').textContent = '';
+}
+
+function clearPin() {
+    pin = '';
+    updatePinDisplay();
+    document.getElementById('statusMsg').textContent = '';
+}
+
+function updatePinDisplay() {
+    document.getElementById('pinDots').textContent = '\u25CF '.repeat(pin.length).trim();
+}
+
+// Keyboard support
+document.addEventListener('keydown', function(e) {
+    if (document.getElementById('mainScreen').classList.contains('d-none')) return;
+    if (e.key >= '0' && e.key <= '9') pressKey(e.key);
+    else if (e.key === 'Backspace') { pin = pin.slice(0, -1); updatePinDisplay(); }
+    else if (e.key === 'Enter') submitPin();
+    else if (e.key === 'Escape') clearPin();
+});
+
+// --- Submit PIN & Camera Flow ---
+function submitPin() {
+    if (pin.length < 4) {
+        document.getElementById('statusMsg').textContent = 'PIN must be at least 4 digits';
+        return;
+    }
+
+    document.getElementById('statusMsg').textContent = 'Verifying...';
+    startCamera();
+}
+
+function startCamera() {
+    document.getElementById('mainScreen').classList.add('d-none');
+    document.getElementById('cameraScreen').classList.remove('d-none');
+
+    var video = document.getElementById('cameraVideo');
+    var canvas = document.getElementById('cameraCanvas');
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 } })
+        .then(function(stream) {
+            video.srcObject = stream;
+            // Wait 2 seconds for camera to adjust, then capture
+            setTimeout(function() {
+                canvas.width = video.videoWidth || 320;
+                canvas.height = video.videoHeight || 240;
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                var photoData = canvas.toDataURL('image/jpeg', 0.7);
+
+                // Stop camera
+                stream.getTracks().forEach(function(t) { t.stop(); });
+
+                // Submit to server
+                clockAction(photoData);
+            }, 2000);
+        })
+        .catch(function(err) {
+            console.error('Camera error:', err);
+            // Proceed without photo if camera fails
+            clockAction('');
+        });
+}
+
+function clockAction(photoData) {
+    fetch('/timeclock/kiosk/clock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin, photo: photoData })
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.success) {
+            showResult(data.employee_name, data.action);
+        } else {
+            showError(data.error || 'Unknown error');
+        }
+    })
+    .catch(function(err) {
+        showError('Connection error. Please try again.');
+    });
+}
+
+function showResult(name, action) {
+    document.getElementById('cameraScreen').classList.add('d-none');
+    document.getElementById('resultScreen').classList.remove('d-none');
+
+    var card = document.getElementById('resultCard');
+    var icon = document.getElementById('resultIcon');
+
+    document.getElementById('resultName').textContent = name;
+
+    if (action === 'in') {
+        card.className = 'result-card clock-in';
+        document.getElementById('resultAction').textContent = 'Clocked In Successfully';
+        icon.className = 'bi bi-check-circle-fill';
+        icon.style.color = '#51cf66';
+    } else {
+        card.className = 'result-card clock-out';
+        document.getElementById('resultAction').textContent = 'Clocked Out Successfully';
+        icon.className = 'bi bi-stop-circle-fill';
+        icon.style.color = '#ff6b6b';
+    }
+
+    // Auto-reset after 5 seconds
+    setTimeout(resetKiosk, 5000);
+}
+
+function showError(msg) {
+    document.getElementById('cameraScreen').classList.add('d-none');
+    document.getElementById('mainScreen').classList.remove('d-none');
+    document.getElementById('statusMsg').textContent = msg;
+    pin = '';
+    updatePinDisplay();
+}
+
+function resetKiosk() {
+    pin = '';
+    updatePinDisplay();
+    document.getElementById('resultScreen').classList.add('d-none');
+    document.getElementById('cameraScreen').classList.add('d-none');
+    document.getElementById('mainScreen').classList.remove('d-none');
+    document.getElementById('statusMsg').textContent = '';
+}
+</script>
+</body>
+</html>
