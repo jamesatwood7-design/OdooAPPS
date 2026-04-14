@@ -214,3 +214,157 @@ def get_weekly_summary(odoo, employee_id, target_date=None):
         'total_hours': week_total,
         'total_hours_fmt': format_duration(week_total),
     }
+
+
+# ---------------------------------------------------------------------------
+# Time Allocation (assign attendance hours to jobs/analytic accounts)
+# ---------------------------------------------------------------------------
+
+def get_jobs_for_allocation(odoo):
+    """Get analytic accounts that can receive time allocations."""
+    return odoo.search_read(
+        'account.analytic.account', [],
+        fields=['id', 'name', 'code'],
+        order='code asc',
+    )
+
+
+def get_attendance_record(odoo, attendance_id):
+    """Get a single attendance record with employee info."""
+    records = odoo.safe_search_read(
+        'hr.attendance',
+        [('id', '=', attendance_id)],
+        fields=['id', 'employee_id', 'check_in', 'check_out', 'worked_hours'],
+    )
+    if not records:
+        return None
+    rec = records[0]
+    rec['check_in_dt'] = odoo_to_datetime(rec.get('check_in'))
+    rec['check_out_dt'] = odoo_to_datetime(rec.get('check_out'))
+    rec['worked_hours_fmt'] = format_duration(rec.get('worked_hours'))
+    return rec
+
+
+def get_allocations_for_attendance(odoo, attendance_id, employee_id, check_in_dt):
+    """Get existing analytic line allocations for a specific attendance.
+
+    We match by employee + date since analytic lines don't have an
+    attendance_id field. We look for lines created by this app
+    (they have a specific name pattern).
+    """
+    if not check_in_dt:
+        return []
+
+    att_date = check_in_dt.strftime('%Y-%m-%d')
+    records = odoo.safe_search_read(
+        'account.analytic.line',
+        [
+            ('employee_id', '=', employee_id),
+            ('date', '=', att_date),
+            ('name', 'ilike', f'[ATT-{attendance_id}]'),
+        ],
+        fields=['id', 'name', 'account_id', 'unit_amount', 'amount', 'date'],
+        order='id asc',
+    )
+
+    for rec in records:
+        rec['hours_fmt'] = format_duration(rec.get('unit_amount'))
+        acct = rec.get('account_id')
+        if isinstance(acct, (list, tuple)):
+            rec['account_name'] = acct[1]
+            rec['account_id_val'] = acct[0]
+        else:
+            rec['account_name'] = str(acct) if acct else ''
+            rec['account_id_val'] = acct
+
+    return records
+
+
+def get_unallocated_attendances(odoo, employee_id, limit=20):
+    """Find recent attendance records that haven't been fully allocated.
+
+    Returns attendances where no matching analytic lines with ATT- tag exist.
+    """
+    # Get recent completed attendances
+    attendances = odoo.safe_search_read(
+        'hr.attendance',
+        [
+            ('employee_id', '=', employee_id),
+            ('check_out', '!=', False),
+        ],
+        fields=['id', 'check_in', 'check_out', 'worked_hours'],
+        order='check_in desc',
+        limit=limit,
+    )
+
+    unallocated = []
+    for att in attendances:
+        att['check_in_dt'] = odoo_to_datetime(att.get('check_in'))
+        att['check_out_dt'] = odoo_to_datetime(att.get('check_out'))
+        att['worked_hours_fmt'] = format_duration(att.get('worked_hours'))
+
+        # Check if this attendance has allocations
+        existing = get_allocations_for_attendance(
+            odoo, att['id'], employee_id, att['check_in_dt']
+        )
+        allocated_hours = sum(a.get('unit_amount', 0) or 0 for a in existing)
+        total_hours = att.get('worked_hours', 0) or 0
+        att['allocated_hours'] = allocated_hours
+        att['allocated_hours_fmt'] = format_duration(allocated_hours)
+        att['remaining_hours'] = max(0, total_hours - allocated_hours)
+        att['remaining_hours_fmt'] = format_duration(max(0, total_hours - allocated_hours))
+        att['fully_allocated'] = allocated_hours >= (total_hours - 0.01)
+        att['allocations'] = existing
+
+        if not att['fully_allocated']:
+            unallocated.append(att)
+
+    return unallocated
+
+
+def save_time_allocations(odoo, attendance_id, employee_id, allocations,
+                          hourly_rate=0):
+    """Save time allocations for an attendance record.
+
+    Each allocation is a dict: {account_id: int, hours: float}
+    Creates account.analytic.line records in Odoo tagged with the
+    attendance ID for tracking.
+
+    Deletes any previous allocations for this attendance before saving.
+    """
+    # Get the attendance to determine the date
+    att = get_attendance_record(odoo, attendance_id)
+    if not att:
+        raise ValueError('Attendance record not found')
+
+    check_in_dt = att['check_in_dt']
+    att_date = check_in_dt.strftime('%Y-%m-%d')
+
+    # Delete existing allocations for this attendance
+    existing = get_allocations_for_attendance(
+        odoo, attendance_id, employee_id, check_in_dt
+    )
+    existing_ids = [e['id'] for e in existing]
+    if existing_ids:
+        odoo.unlink('account.analytic.line', existing_ids)
+
+    # Create new allocations
+    created_ids = []
+    for alloc in allocations:
+        account_id = alloc.get('account_id')
+        hours = alloc.get('hours', 0)
+        if not account_id or hours <= 0:
+            continue
+
+        amount = -(hours * hourly_rate) if hourly_rate else 0
+        line_id = odoo.create('account.analytic.line', {
+            'name': f'[ATT-{attendance_id}] Time allocation',
+            'account_id': account_id,
+            'employee_id': employee_id,
+            'date': att_date,
+            'unit_amount': hours,
+            'amount': amount,
+        })
+        created_ids.append(line_id)
+
+    return created_ids

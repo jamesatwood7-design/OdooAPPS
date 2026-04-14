@@ -183,3 +183,114 @@ def api_status():
         })
     except (OdooConnectionError, OdooAPIError) as e:
         return jsonify({'error': str(e)}), 503
+
+
+# ---------------------------------------------------------------------------
+# Time Allocation routes
+# ---------------------------------------------------------------------------
+
+@bp.route('/allocate')
+def allocate_list():
+    """Show attendance records that need time allocation."""
+    employee_id = session.get('timeclock_employee_id')
+    if not employee_id:
+        flash('Please select an employee first.', 'warning')
+        return redirect(url_for('timeclock.dashboard'))
+
+    odoo = current_app.odoo
+    unallocated = []
+    employee = None
+
+    try:
+        employee = services.get_employee(odoo, employee_id)
+        unallocated = services.get_unallocated_attendances(odoo, employee_id)
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+
+    return render_template(
+        'timeclock/allocate_list.html',
+        employee=employee,
+        unallocated=unallocated,
+    )
+
+
+@bp.route('/allocate/<int:attendance_id>', methods=['GET', 'POST'])
+def allocate(attendance_id):
+    """Allocate hours from an attendance record to jobs."""
+    employee_id = session.get('timeclock_employee_id')
+    if not employee_id:
+        flash('Please select an employee first.', 'warning')
+        return redirect(url_for('timeclock.dashboard'))
+
+    odoo = current_app.odoo
+
+    if request.method == 'POST':
+        try:
+            # Parse allocation rows from form
+            allocations = []
+            hourly_rate = request.form.get('hourly_rate', 0, type=float)
+            i = 0
+            while True:
+                acct_key = f'account_id_{i}'
+                hours_key = f'hours_{i}'
+                if acct_key not in request.form:
+                    break
+                account_id = request.form.get(acct_key, type=int)
+                hours = request.form.get(hours_key, 0, type=float)
+                if account_id and hours > 0:
+                    allocations.append({'account_id': account_id, 'hours': hours})
+                i += 1
+
+            if not allocations:
+                flash('Please add at least one allocation.', 'warning')
+                return redirect(url_for('timeclock.allocate', attendance_id=attendance_id))
+
+            services.save_time_allocations(
+                odoo, attendance_id, employee_id, allocations, hourly_rate
+            )
+            flash('Time allocated successfully.', 'success')
+            return redirect(url_for('timeclock.allocate_list'))
+
+        except OdooConnectionError as e:
+            flash(f'Cannot connect to Odoo: {e}', 'danger')
+        except OdooAPIError as e:
+            flash(f'Error saving allocation: {e}', 'danger')
+        except ValueError as e:
+            flash(str(e), 'danger')
+
+    # GET: load the attendance record, existing allocations, and job list
+    attendance = None
+    existing = []
+    jobs = []
+    employee = None
+
+    try:
+        employee = services.get_employee(odoo, employee_id)
+        attendance = services.get_attendance_record(odoo, attendance_id)
+        if not attendance:
+            flash('Attendance record not found.', 'warning')
+            return redirect(url_for('timeclock.allocate_list'))
+
+        existing = services.get_allocations_for_attendance(
+            odoo, attendance_id, employee_id, attendance['check_in_dt']
+        )
+        jobs = services.get_jobs_for_allocation(odoo)
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+
+    allocated_hours = sum(a.get('unit_amount', 0) or 0 for a in existing)
+    total_hours = attendance.get('worked_hours', 0) or 0 if attendance else 0
+
+    return render_template(
+        'timeclock/allocate.html',
+        employee=employee,
+        attendance=attendance,
+        existing=existing,
+        jobs=jobs,
+        allocated_hours=allocated_hours,
+        remaining_hours=max(0, total_hours - allocated_hours),
+    )

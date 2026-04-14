@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Allocate Hours - Time Clock{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 mx-auto">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-pencil-square"></i> Allocate Hours to Jobs</h2>
+            <a href="{{ url_for('timeclock.allocate_list') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+
+        {% if attendance %}
+        <!-- Shift Info -->
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">Shift Details</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Date</small>
+                        <strong>{{ attendance.check_in_dt.strftime('%A, %B %d, %Y') if attendance.check_in_dt else '-' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Clock In</small>
+                        <strong>{{ attendance.check_in_dt.strftime('%I:%M %p') if attendance.check_in_dt else '-' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Clock Out</small>
+                        <strong>{{ attendance.check_out_dt.strftime('%I:%M %p') if attendance.check_out_dt else '-' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Total Hours</small>
+                        <h4 class="text-primary mb-0">{{ attendance.worked_hours_fmt }}</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Remaining Hours Indicator -->
+        <div class="card mb-4" id="remainingCard">
+            <div class="card-body text-center py-2">
+                <span class="text-muted">Remaining to allocate:</span>
+                <strong class="fs-5 ms-2" id="remainingHours">
+                    {{ '%.2f'|format(remaining_hours) }}h
+                </strong>
+                <span class="ms-3 text-muted">|</span>
+                <span class="text-muted ms-3">Allocated:</span>
+                <strong class="fs-5 ms-2 text-success" id="allocatedHours">
+                    {{ '%.2f'|format(allocated_hours) }}h
+                </strong>
+            </div>
+        </div>
+
+        <!-- Allocation Form -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Allocations</h5>
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow()">
+                    <i class="bi bi-plus-circle"></i> Add Job
+                </button>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="allocationForm">
+                    <input type="hidden" name="hourly_rate" value="0">
+
+                    <table class="table" id="allocTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 60%">Job / Analytic Account</th>
+                                <th style="width: 25%">Hours</th>
+                                <th style="width: 15%"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="allocBody">
+                            {% if existing %}
+                                {% for alloc in existing %}
+                                <tr>
+                                    <td>
+                                        <select name="account_id_{{ loop.index0 }}" class="form-select" required>
+                                            <option value="">-- Select Job --</option>
+                                            {% for job in jobs %}
+                                                <option value="{{ job.id }}"
+                                                    {% if job.id == alloc.account_id_val %}selected{% endif %}>
+                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="number" name="hours_{{ loop.index0 }}"
+                                               class="form-control hours-input" step="0.25" min="0.25"
+                                               value="{{ '%.2f'|format(alloc.unit_amount or 0) }}"
+                                               onchange="updateRemaining()" oninput="updateRemaining()">
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <!-- Start with one empty row -->
+                                <tr>
+                                    <td>
+                                        <select name="account_id_0" class="form-select" required>
+                                            <option value="">-- Select Job --</option>
+                                            {% for job in jobs %}
+                                                <option value="{{ job.id }}">
+                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="number" name="hours_0" class="form-control hours-input"
+                                               step="0.25" min="0.25"
+                                               value="{{ '%.2f'|format(attendance.worked_hours or 0) }}"
+                                               onchange="updateRemaining()" oninput="updateRemaining()">
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+
+                    <div class="d-flex justify-content-between align-items-center">
+                        <button type="button" class="btn btn-outline-success" onclick="addRow()">
+                            <i class="bi bi-plus-circle"></i> Add Another Job
+                        </button>
+                        <div>
+                            <a href="{{ url_for('timeclock.allocate_list') }}" class="btn btn-outline-secondary me-2">Cancel</a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i> Save Allocations
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var totalHours = {{ attendance.worked_hours or 0 }};
+var rowCount = document.querySelectorAll('#allocBody tr').length;
+
+var jobOptions = '';
+{% for job in jobs %}
+jobOptions += '<option value="{{ job.id }}">{% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}</option>';
+{% endfor %}
+
+function addRow() {
+    var tbody = document.getElementById('allocBody');
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' +
+        '<select name="account_id_' + rowCount + '" class="form-select" required>' +
+        '<option value="">-- Select Job --</option>' + jobOptions + '</select></td>' +
+        '<td><input type="number" name="hours_' + rowCount + '" class="form-control hours-input" ' +
+        'step="0.25" min="0.25" value="0" onchange="updateRemaining()" oninput="updateRemaining()"></td>' +
+        '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">' +
+        '<i class="bi bi-trash"></i></button></td>';
+    tbody.appendChild(tr);
+    rowCount++;
+    updateRemaining();
+}
+
+function removeRow(btn) {
+    var row = btn.closest('tr');
+    row.remove();
+    renumberRows();
+    updateRemaining();
+}
+
+function renumberRows() {
+    var rows = document.querySelectorAll('#allocBody tr');
+    rows.forEach(function(row, i) {
+        var select = row.querySelector('select');
+        var input = row.querySelector('input[type="number"]');
+        if (select) select.name = 'account_id_' + i;
+        if (input) input.name = 'hours_' + i;
+    });
+    rowCount = rows.length;
+}
+
+function updateRemaining() {
+    var inputs = document.querySelectorAll('.hours-input');
+    var allocated = 0;
+    inputs.forEach(function(input) {
+        allocated += parseFloat(input.value) || 0;
+    });
+    var remaining = Math.max(0, totalHours - allocated);
+
+    document.getElementById('remainingHours').textContent = remaining.toFixed(2) + 'h';
+    document.getElementById('allocatedHours').textContent = allocated.toFixed(2) + 'h';
+
+    var card = document.getElementById('remainingCard');
+    if (remaining < 0.01) {
+        card.className = 'card mb-4 border-success';
+    } else {
+        card.className = 'card mb-4 border-warning';
+    }
+}
+
+updateRemaining();
+</script>
+{% endblock %}

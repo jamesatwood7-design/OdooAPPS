@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Allocate Time - Time Clock{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 mx-auto">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-clock-history"></i> Unallocated Time</h2>
+            <a href="{{ url_for('timeclock.dashboard') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+
+        {% if employee %}
+        <p class="text-muted">Employee: <strong>{{ employee.name }}</strong></p>
+        {% endif %}
+
+        {% if unallocated %}
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            You have <strong>{{ unallocated|length }}</strong> shift(s) with hours that haven't been allocated to jobs yet.
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Date</th>
+                        <th>Clock In</th>
+                        <th>Clock Out</th>
+                        <th>Total Hours</th>
+                        <th>Allocated</th>
+                        <th>Remaining</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for att in unallocated %}
+                    <tr>
+                        <td>{{ att.check_in_dt.strftime('%Y-%m-%d') if att.check_in_dt else '-' }}</td>
+                        <td>{{ att.check_in_dt.strftime('%I:%M %p') if att.check_in_dt else '-' }}</td>
+                        <td>{{ att.check_out_dt.strftime('%I:%M %p') if att.check_out_dt else '-' }}</td>
+                        <td><strong>{{ att.worked_hours_fmt }}</strong></td>
+                        <td>{{ att.allocated_hours_fmt }}</td>
+                        <td>
+                            <span class="text-danger fw-bold">{{ att.remaining_hours_fmt }}</span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('timeclock.allocate', attendance_id=att.id) }}"
+                               class="btn btn-sm btn-warning">
+                                <i class="bi bi-pencil-square"></i> Allocate
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle"></i> All recent shifts have been allocated. You're all caught up!
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
