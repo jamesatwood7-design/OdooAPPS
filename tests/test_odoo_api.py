@@ -53,9 +53,14 @@ class TestOdooClientOperations:
 
     def _make_client(self):
         client = OdooClient('http://localhost:8069', 'testdb', 'admin', 'admin')
-        client._common_proxy = self.mock_common
-        client._object_proxy = self.mock_object
         client.uid = 1
+
+        def mock_make_proxy(endpoint):
+            if endpoint == 'common':
+                return self.mock_common
+            return self.mock_object
+
+        client._make_proxy = mock_make_proxy
         return client
 
     def test_search_read(self):

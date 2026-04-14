@@ -1,4 +1,5 @@
 import xmlrpc.client
+import http.client
 from common.exceptions import OdooConnectionError, OdooAuthenticationError, OdooAPIError
 
 
@@ -7,6 +8,10 @@ class OdooClient:
 
     This is the single gateway to Odoo - no other module should use
     xmlrpc.client directly.
+
+    A fresh ServerProxy is created for each call to avoid stale HTTP
+    connection issues (CannotSendRequest) that occur when a single
+    proxy is reused across multiple Flask requests.
     """
 
     def __init__(self, url, db, username, password):
@@ -15,34 +20,21 @@ class OdooClient:
         self.username = username
         self.password = password
         self.uid = None
-        self._common_proxy = None
-        self._object_proxy = None
         self._model_fields_cache = {}
 
-    def _get_common_proxy(self):
-        if self._common_proxy is None:
-            try:
-                self._common_proxy = xmlrpc.client.ServerProxy(
-                    f'{self.url}/xmlrpc/2/common', allow_none=True
-                )
-            except Exception as e:
-                raise OdooConnectionError(f'Cannot connect to Odoo at {self.url}: {e}')
-        return self._common_proxy
-
-    def _get_object_proxy(self):
-        if self._object_proxy is None:
-            try:
-                self._object_proxy = xmlrpc.client.ServerProxy(
-                    f'{self.url}/xmlrpc/2/object', allow_none=True
-                )
-            except Exception as e:
-                raise OdooConnectionError(f'Cannot connect to Odoo at {self.url}: {e}')
-        return self._object_proxy
+    def _make_proxy(self, endpoint):
+        """Create a fresh ServerProxy for the given endpoint."""
+        try:
+            return xmlrpc.client.ServerProxy(
+                f'{self.url}/xmlrpc/2/{endpoint}', allow_none=True
+            )
+        except Exception as e:
+            raise OdooConnectionError(f'Cannot connect to Odoo at {self.url}: {e}')
 
     def authenticate(self):
         """Authenticate with the Odoo server and store the user ID."""
         try:
-            common = self._get_common_proxy()
+            common = self._make_proxy('common')
             self.uid = common.authenticate(self.db, self.username, self.password, {})
         except OdooConnectionError:
             raise
@@ -58,11 +50,8 @@ class OdooClient:
     def execute_kw(self, model, method, args, kwargs=None):
         """Execute an Odoo RPC call.
 
-        Args:
-            model: Odoo model name (e.g. 'hr.employee')
-            method: Method to call (e.g. 'search_read')
-            args: Positional arguments as a list
-            kwargs: Keyword arguments as a dict
+        A fresh ServerProxy is created for each call to prevent
+        stale connection errors.
         """
         if self.uid is None:
             self.authenticate()
@@ -71,7 +60,7 @@ class OdooClient:
             kwargs = {}
 
         try:
-            obj = self._get_object_proxy()
+            obj = self._make_proxy('object')
             return obj.execute_kw(
                 self.db, self.uid, self.password,
                 model, method, args, kwargs
@@ -80,6 +69,8 @@ class OdooClient:
             raise OdooAPIError(f'Odoo API error on {model}.{method}: {e.faultString}')
         except xmlrpc.client.ProtocolError as e:
             raise OdooConnectionError(f'Protocol error communicating with Odoo: {e}')
+        except http.client.CannotSendRequest as e:
+            raise OdooConnectionError(f'Connection error with Odoo (try again): {e}')
         except (ConnectionRefusedError, OSError) as e:
             raise OdooConnectionError(f'Lost connection to Odoo: {e}')
 
