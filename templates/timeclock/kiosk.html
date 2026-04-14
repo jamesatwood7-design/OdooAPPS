@@ -217,6 +217,10 @@ function startCamera() {
 }
 
 function clockAction(photoData) {
+    // Hide all screens, show a brief loading state
+    document.getElementById('mainScreen').classList.add('d-none');
+    document.getElementById('cameraScreen').classList.add('d-none');
+
     fetch('/timeclock/kiosk/clock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,6 +240,7 @@ function clockAction(photoData) {
 }
 
 function showResult(name, action) {
+    document.getElementById('mainScreen').classList.add('d-none');
     document.getElementById('cameraScreen').classList.add('d-none');
     document.getElementById('resultScreen').classList.remove('d-none');
 
