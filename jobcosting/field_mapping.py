@@ -29,8 +29,11 @@ DASHBOARD_COLUMNS = [
     ('Salesman', 'Salesman', 'text'),
 ]
 
-# Labels to try for the status/stage field
-STATUS_FIELD_LABELS = ['Status', 'Stage', 'Job Status', 'State']
+# Labels to try for the status/stage field (tried in order)
+STATUS_FIELD_LABELS = [
+    'Status', 'Stage', 'Job Status', 'State', 'Progress',
+    'Job Stage', 'Kanban State', 'Status Bar',
+]
 
 # Detail page sections: (section_name, [(display_label, odoo_label_to_match, display_format)])
 # display_format: 'currency' adds $, 'percent' adds %, 'number' plain, 'text' plain
@@ -194,16 +197,29 @@ def resolve_detail_sections(odoo):
 def resolve_status_field(odoo):
     """Find the status/stage field on account.analytic.account.
 
+    Tries label matching first, then falls back to finding any selection
+    field whose options contain keywords like 'progress' or 'completed'.
+
     Returns (technical_name, selection_options) or (None, []) if not found.
     selection_options is a list of (value, label) tuples.
     """
     field_map = get_custom_field_map(odoo)
 
+    # Strategy 1: match by label
     for label in STATUS_FIELD_LABELS:
         tech_name, field_info = resolve_field(field_map, label)
         if tech_name and field_info:
             sel = field_info.get('selection') or []
-            return tech_name, sel
+            if sel:
+                return tech_name, sel
+
+    # Strategy 2: find any custom selection field with status-like options
+    status_keywords = {'progress', 'completed', 'closed', 'warranty', 'paid'}
+    for norm_label, info in field_map.items():
+        if info['type'] == 'selection' and info.get('selection'):
+            sel_labels = {lbl.lower() for _, lbl in info['selection']}
+            if sel_labels & status_keywords:
+                return info['technical_name'], info['selection']
 
     return None, []
 

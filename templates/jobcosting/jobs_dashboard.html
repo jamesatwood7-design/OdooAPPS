@@ -37,31 +37,30 @@
     </div>
 </div>
 
-<!-- Status Filter Bar -->
-{% if status_options %}
+<!-- Filter & Search Bar (always visible) -->
 <div class="card mb-3">
     <div class="card-body py-2">
         <div class="d-flex align-items-center flex-wrap gap-2">
+            {% if status_options %}
             <span class="text-muted me-2"><i class="bi bi-funnel"></i> Status:</span>
-            <button class="btn btn-sm btn-outline-dark status-filter" data-status="all">All</button>
+            <button class="btn btn-sm btn-outline-dark status-filter {% if not default_status %}active{% endif %}" data-status="all">All</button>
             {% for status in status_options %}
             <button class="btn btn-sm {% if status == default_status %}btn-primary{% else %}btn-outline-primary{% endif %} status-filter"
                     data-status="{{ status }}">{{ status }}</button>
             {% endfor %}
+            {% endif %}
             <span class="ms-auto">
-                <!-- Search -->
                 <div class="input-group input-group-sm" style="width: 250px;">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" id="jobSearch" class="form-control" placeholder="Search...">
+                    <input type="text" id="jobSearch" class="form-control" placeholder="Search jobs...">
                 </div>
             </span>
             <small class="text-muted ms-2">
-                <span id="jobCount">0</span> jobs
+                <span id="jobCount">{{ jobs|length }}</span> jobs
             </small>
         </div>
     </div>
 </div>
-{% endif %}
 
 {% if jobs %}
 <!-- LIST VIEW -->
@@ -174,7 +173,10 @@
 
 {% block extra_scripts %}
 <script>
-var currentStatus = '{{ default_status }}';
+// Default to 'all' if no status options exist or default doesn't match any data
+var defaultStatus = '{{ default_status }}';
+var hasStatusFilter = {{ 'true' if status_options else 'false' }};
+var currentStatus = hasStatusFilter ? defaultStatus : 'all';
 var currentView = localStorage.getItem('jobsView') || 'list';
 
 // --- Status Filter ---
@@ -182,11 +184,16 @@ document.querySelectorAll('.status-filter').forEach(function(btn) {
     btn.addEventListener('click', function() {
         currentStatus = this.dataset.status;
         document.querySelectorAll('.status-filter').forEach(function(b) {
-            b.classList.remove('btn-primary');
+            b.classList.remove('btn-primary', 'active');
             b.classList.add('btn-outline-primary');
         });
-        this.classList.remove('btn-outline-primary');
-        this.classList.add('btn-primary');
+        if (this.dataset.status === 'all') {
+            this.classList.remove('btn-outline-primary');
+            this.classList.add('btn-outline-dark', 'active');
+        } else {
+            this.classList.remove('btn-outline-primary');
+            this.classList.add('btn-primary');
+        }
         applyFilters();
     });
 });
@@ -207,8 +214,9 @@ function applyFilters() {
         var text = row.textContent.toLowerCase();
         var statusMatch = (currentStatus === 'all' || status === currentStatus);
         var searchMatch = (!query || text.indexOf(query) !== -1);
-        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
-        if (statusMatch && searchMatch) count++;
+        var visible = statusMatch && searchMatch;
+        row.style.display = visible ? '' : 'none';
+        if (visible) count++;
     });
 
     // Card view
@@ -221,6 +229,21 @@ function applyFilters() {
     });
 
     document.getElementById('jobCount').textContent = count;
+
+    // If default filter shows 0 results, auto-switch to "all"
+    if (count === 0 && currentStatus !== 'all' && !query) {
+        currentStatus = 'all';
+        document.querySelectorAll('.status-filter').forEach(function(b) {
+            b.classList.remove('btn-primary', 'active');
+            b.classList.add('btn-outline-primary');
+            if (b.dataset.status === 'all') {
+                b.classList.remove('btn-outline-primary');
+                b.classList.add('btn-outline-dark', 'active');
+            }
+        });
+        applyFilters();
+        return;
+    }
 }
 
 // --- View Toggle ---
@@ -247,13 +270,10 @@ var savedCols = JSON.parse(localStorage.getItem('jobsCols') || 'null');
 
 document.querySelectorAll('.col-toggle').forEach(function(cb) {
     var colIdx = parseInt(cb.dataset.col);
-
-    // Restore saved state
     if (savedCols && savedCols[colIdx] === false) {
         cb.checked = false;
         toggleColumn(colIdx, false);
     }
-
     cb.addEventListener('change', function() {
         toggleColumn(colIdx, this.checked);
         saveCols();
@@ -264,12 +284,8 @@ function toggleColumn(colIdx, visible) {
     var table = document.getElementById('jobsTable');
     if (!table) return;
     var display = visible ? '' : 'none';
-
-    // Header
     var ths = table.querySelectorAll('thead th');
     if (ths[colIdx]) ths[colIdx].style.display = display;
-
-    // Body cells
     table.querySelectorAll('tbody tr').forEach(function(row) {
         if (row.cells[colIdx]) row.cells[colIdx].style.display = display;
     });
