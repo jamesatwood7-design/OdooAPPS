@@ -302,8 +302,10 @@ def jobs_dashboard():
 
     return render_template(
         'jobcosting/jobs_dashboard.html',
-        columns=data['columns'],
-        jobs=data['jobs'],
+        columns=data.get('columns', []),
+        jobs=data.get('jobs', []),
+        status_options=data.get('status_options', []),
+        default_status=data.get('default_status', 'In Progress'),
     )
 
 

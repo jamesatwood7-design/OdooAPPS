@@ -254,12 +254,32 @@ def get_weekly_summary(odoo, employee_id, target_date=None):
 # ---------------------------------------------------------------------------
 
 def get_jobs_for_allocation(odoo):
-    """Get analytic accounts that can receive time allocations."""
-    return odoo.search_read(
+    """Get analytic accounts that can receive time allocations.
+
+    Includes the status field for client-side filtering (default to In Progress).
+    """
+    from jobcosting.field_mapping import resolve_status_field, format_odoo_value
+
+    status_field, status_options = resolve_status_field(odoo)
+    fields = ['id', 'name', 'code']
+    if status_field:
+        fields.append(status_field)
+
+    jobs = odoo.search_read(
         'account.analytic.account', [],
-        fields=['id', 'name', 'code'],
+        fields=fields,
         order='code asc',
     )
+
+    status_sel_map = dict(status_options) if status_options else {}
+    for job in jobs:
+        raw_status = job.get(status_field, '') if status_field else ''
+        if isinstance(raw_status, (list, tuple)):
+            job['status'] = raw_status[1] if len(raw_status) >= 2 else ''
+        else:
+            job['status'] = status_sel_map.get(raw_status, str(raw_status)) if raw_status else ''
+
+    return jobs
 
 
 def get_attendance_record(odoo, attendance_id):

@@ -85,7 +85,7 @@
                                             {% for job in jobs %}
                                                 <option value="{{ job.id }}"
                                                     {% if job.id == alloc.account_id_val %}selected{% endif %}>
-                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}
+                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}{% if job.status %} ({{ job.status }}){% endif %}
                                                 </option>
                                             {% endfor %}
                                         </select>
@@ -111,7 +111,7 @@
                                             <option value="">-- Select Job --</option>
                                             {% for job in jobs %}
                                                 <option value="{{ job.id }}">
-                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}
+                                                    {% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}{% if job.status %} ({{ job.status }}){% endif %}
                                                 </option>
                                             {% endfor %}
                                         </select>
@@ -158,7 +158,7 @@ var rowCount = document.querySelectorAll('#allocBody tr').length;
 
 var jobOptions = '';
 {% for job in jobs %}
-jobOptions += '<option value="{{ job.id }}">{% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}</option>';
+jobOptions += '<option value="{{ job.id }}">{% if job.code %}[{{ job.code }}] {% endif %}{{ job.name }}{% if job.status %} ({{ job.status }}){% endif %}</option>';
 {% endfor %}
 
 function addRow() {

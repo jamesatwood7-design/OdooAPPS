@@ -1,6 +1,7 @@
 from common.utils import date_to_odoo, odoo_to_date, format_duration, format_many2one
 from jobcosting.field_mapping import (
     resolve_dashboard_columns, resolve_detail_sections, format_odoo_value,
+    resolve_status_field,
 )
 
 
@@ -361,16 +362,32 @@ def get_job_dashboard_data(odoo):
     (1 cached fields_get + 1 search_read).
     """
     columns, field_names = resolve_dashboard_columns(odoo)
+
+    # Discover the status field and its options
+    status_field, status_options = resolve_status_field(odoo)
+    if status_field and status_field not in field_names:
+        field_names.append(status_field)
+
     jobs = odoo.search_read(
         'account.analytic.account', [],
         fields=field_names,
         order='code asc',
     )
 
+    # Build the selection label map for the status field
+    status_sel_map = dict(status_options) if status_options else {}
+
     # Pre-format values for the template
     formatted_jobs = []
     for job in jobs:
-        row = {'id': job['id'], 'cells': []}
+        # Get status value for filtering
+        raw_status = job.get(status_field, '') if status_field else ''
+        if isinstance(raw_status, (list, tuple)):
+            status_val = raw_status[1] if len(raw_status) >= 2 else ''
+        else:
+            status_val = status_sel_map.get(raw_status, str(raw_status)) if raw_status else ''
+
+        row = {'id': job['id'], 'status': status_val, 'cells': []}
         for display_label, tech_name, sort_type, field_info in columns:
             raw_value = job.get(tech_name, '')
             formatted = format_odoo_value(raw_value, field_info)
@@ -380,15 +397,21 @@ def get_job_dashboard_data(odoo):
             else:
                 sort_val = raw_value if raw_value is not None and raw_value is not False else ''
             row['cells'].append({
+                'label': display_label,
                 'display': formatted,
                 'raw': sort_val,
                 'sort_type': sort_type,
             })
         formatted_jobs.append(row)
 
+    # Get unique status values for the filter bar
+    status_values = sorted(set(j['status'] for j in formatted_jobs if j['status']))
+
     return {
         'columns': [(c[0], c[2]) for c in columns],  # (label, sort_type)
         'jobs': formatted_jobs,
+        'status_options': status_values,
+        'default_status': 'In Progress',
     }
 
 

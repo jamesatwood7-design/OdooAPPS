@@ -14,6 +14,7 @@ import re
 DASHBOARD_COLUMNS = [
     ('Code', 'code', 'text'),
     ('Job Name', 'name', 'text'),
+    ('Status', 'Status', 'text'),
     ('Customer', 'Customer', 'text'),
     ('Building Type', 'Building Type', 'text'),
     ('Sq Ft', 'Square Footage', 'number'),
@@ -27,6 +28,9 @@ DASHBOARD_COLUMNS = [
     ('Projected Profit', 'Projected Profit', 'currency'),
     ('Salesman', 'Salesman', 'text'),
 ]
+
+# Labels to try for the status/stage field
+STATUS_FIELD_LABELS = ['Status', 'Stage', 'Job Status', 'State']
 
 # Detail page sections: (section_name, [(display_label, odoo_label_to_match, display_format)])
 # display_format: 'currency' adds $, 'percent' adds %, 'number' plain, 'text' plain
@@ -185,6 +189,23 @@ def resolve_detail_sections(odoo):
             sections.append((section_name, resolved_fields))
 
     return sections, list(technical_names)
+
+
+def resolve_status_field(odoo):
+    """Find the status/stage field on account.analytic.account.
+
+    Returns (technical_name, selection_options) or (None, []) if not found.
+    selection_options is a list of (value, label) tuples.
+    """
+    field_map = get_custom_field_map(odoo)
+
+    for label in STATUS_FIELD_LABELS:
+        tech_name, field_info = resolve_field(field_map, label)
+        if tech_name and field_info:
+            sel = field_info.get('selection') or []
+            return tech_name, sel
+
+    return None, []
 
 
 def format_odoo_value(value, field_info):

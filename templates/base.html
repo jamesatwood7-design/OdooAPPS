@@ -28,15 +28,9 @@
                     </li>
                     {% if session.get('auth_type') == 'odoo_user' %}
                     <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/jobcosting/' %}active{% endif %}"
-                           href="{{ url_for('jobcosting.dashboard') }}">
-                            <i class="bi bi-calculator"></i> Job Costing
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if '/jobcosting/job' in request.path %}active{% endif %}"
+                        <a class="nav-link {% if request.path.startswith('/jobcosting') %}active{% endif %}"
                            href="{{ url_for('jobcosting.jobs_dashboard') }}">
-                            <i class="bi bi-table"></i> Jobs
+                            <i class="bi bi-briefcase"></i> Jobs
                         </a>
                     </li>
                     {% endif %}

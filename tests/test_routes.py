@@ -168,7 +168,7 @@ class TestJobsRoutes:
         ]
         resp = odoo_user_client.get('/jobcosting/jobs')
         assert resp.status_code == 200
-        assert b'Jobs Dashboard' in resp.data
+        assert b'Jobs' in resp.data
 
     def test_job_detail_loads(self, odoo_user_client, mock_odoo):
         mock_odoo.fields_get.return_value = {

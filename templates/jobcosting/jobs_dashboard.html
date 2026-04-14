@@ -1,88 +1,336 @@
 {% extends "base.html" %}
 
-{% block title %}Jobs Dashboard - Job Costing{% endblock %}
+{% block title %}Jobs - Dashboard{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-table"></i> Jobs Dashboard</h2>
+    <h2><i class="bi bi-briefcase"></i> Jobs</h2>
     <div>
-        <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-outline-secondary me-2">
-            <i class="bi bi-grid"></i> Projects View
-        </a>
+        <!-- View Toggle -->
+        <div class="btn-group me-2" role="group">
+            <button type="button" class="btn btn-outline-secondary active" id="listViewBtn" onclick="setView('list')">
+                <i class="bi bi-list-ul"></i> List
+            </button>
+            <button type="button" class="btn btn-outline-secondary" id="cardViewBtn" onclick="setView('card')">
+                <i class="bi bi-grid-3x3-gap"></i> Cards
+            </button>
+        </div>
+        <!-- Column Selector (list view only) -->
+        <div class="btn-group me-2" id="colSelectorWrap">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-columns-gap"></i> Columns
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end p-2" id="colSelector" style="min-width: 200px;">
+                {% for label, sort_type in columns %}
+                <li>
+                    <label class="dropdown-item py-1">
+                        <input type="checkbox" class="form-check-input me-2 col-toggle"
+                               data-col="{{ loop.index0 }}" checked> {{ label }}
+                    </label>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
         <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-primary">
             <i class="bi bi-plus-circle"></i> New Entry
         </a>
     </div>
 </div>
 
-<!-- Search Bar -->
+<!-- Status Filter Bar -->
+{% if status_options %}
 <div class="card mb-3">
     <div class="card-body py-2">
-        <div class="row align-items-center">
-            <div class="col-md-6">
-                <div class="input-group input-group-sm">
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <span class="text-muted me-2"><i class="bi bi-funnel"></i> Status:</span>
+            <button class="btn btn-sm btn-outline-dark status-filter" data-status="all">All</button>
+            {% for status in status_options %}
+            <button class="btn btn-sm {% if status == default_status %}btn-primary{% else %}btn-outline-primary{% endif %} status-filter"
+                    data-status="{{ status }}">{{ status }}</button>
+            {% endfor %}
+            <span class="ms-auto">
+                <!-- Search -->
+                <div class="input-group input-group-sm" style="width: 250px;">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" id="jobSearch" class="form-control"
-                           placeholder="Search jobs by name, code, customer...">
+                    <input type="text" id="jobSearch" class="form-control" placeholder="Search...">
                 </div>
-            </div>
-            <div class="col-md-6 text-end">
-                <small class="text-muted">
-                    <span id="jobCount">{{ jobs|length }}</span> jobs
-                </small>
-            </div>
+            </span>
+            <small class="text-muted ms-2">
+                <span id="jobCount">0</span> jobs
+            </small>
         </div>
     </div>
 </div>
+{% endif %}
 
 {% if jobs %}
-<div class="table-responsive">
-    <table class="table table-sm table-striped table-hover job-table" id="jobsTable">
-        <thead class="table-dark sticky-top">
-            <tr>
-                {% for label, sort_type in columns %}
-                <th class="sortable" data-sort-type="{{ sort_type }}" data-col-index="{{ loop.index0 }}">
-                    {{ label }}
-                    <span class="sort-icon"></span>
-                </th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for job in jobs %}
-            <tr>
-                {% for cell in job.cells %}
-                <td data-sort-val="{{ cell.raw }}"
-                    {% if cell.sort_type == 'currency' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
-                    {% if cell.sort_type == 'percent' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
-                    {% if cell.sort_type == 'percent' and cell.raw and cell.raw > 0 %}class="text-success"{% endif %}>
-                    {% if loop.index0 == 1 %}
-                        <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}" class="text-decoration-none fw-semibold">
+<!-- LIST VIEW -->
+<div id="listView">
+    <div class="table-responsive">
+        <table class="table table-sm table-striped table-hover job-table" id="jobsTable">
+            <thead class="table-dark sticky-top">
+                <tr>
+                    {% for label, sort_type in columns %}
+                    <th class="sortable" data-sort-type="{{ sort_type }}" data-col-index="{{ loop.index0 }}">
+                        {{ label }}
+                        <span class="sort-icon"></span>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr data-status="{{ job.status }}">
+                    {% for cell in job.cells %}
+                    <td data-sort-val="{{ cell.raw }}"
+                        {% if cell.sort_type == 'currency' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
+                        {% if cell.sort_type == 'percent' and cell.raw and cell.raw < 0 %}class="text-danger"{% endif %}
+                        {% if cell.sort_type == 'percent' and cell.raw and cell.raw > 0 %}class="text-success"{% endif %}>
+                        {% if cell.label == 'Job Name' %}
+                            <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}" class="text-decoration-none fw-semibold">
+                                {{ cell.display }}
+                            </a>
+                        {% elif cell.label == 'Status' and cell.display %}
+                            <span class="badge {% if cell.display == 'In Progress' %}bg-primary{% elif cell.display == 'Job Completed' %}bg-success{% elif cell.display == 'Closed' %}bg-dark{% elif cell.display == 'Commission Paid' %}bg-info{% else %}bg-secondary{% endif %}">
+                                {{ cell.display }}
+                            </span>
+                        {% elif cell.sort_type == 'currency' and cell.display %}
+                            ${{ cell.display }}
+                        {% elif cell.sort_type == 'percent' and cell.display %}
+                            {{ cell.display }}%
+                        {% elif cell.sort_type == 'date' and not cell.display %}
+                            <span class="badge bg-info text-dark">In Progress</span>
+                        {% else %}
                             {{ cell.display }}
-                        </a>
-                    {% elif cell.sort_type == 'currency' and cell.display %}
-                        ${{ cell.display }}
-                    {% elif cell.sort_type == 'percent' and cell.display %}
-                        {{ cell.display }}%
-                    {% elif cell.sort_type == 'date' and not cell.display %}
-                        <span class="badge bg-info text-dark">In Progress</span>
-                    {% else %}
-                        {{ cell.display }}
-                    {% endif %}
-                </td>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
                 {% endfor %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
 </div>
+
+<!-- CARD VIEW -->
+<div id="cardView" class="d-none">
+    <div class="row g-3">
+        {% for job in jobs %}
+        <div class="col-md-6 col-lg-4 job-card-wrap" data-status="{{ job.status }}">
+            <div class="card h-100 shadow-sm project-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <small class="text-muted">{{ job.cells[0].display }}</small>
+                            <h6 class="mb-0">
+                                <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}" class="text-decoration-none">
+                                    {{ job.cells[1].display }}
+                                </a>
+                            </h6>
+                        </div>
+                        {% if job.status %}
+                        <span class="badge {% if job.status == 'In Progress' %}bg-primary{% elif job.status == 'Job Completed' %}bg-success{% elif job.status == 'Closed' %}bg-dark{% elif job.status == 'Commission Paid' %}bg-info{% else %}bg-secondary{% endif %}">
+                            {{ job.status }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div class="row text-center mt-3 g-2">
+                        {% for cell in job.cells %}
+                            {% if cell.sort_type == 'currency' and cell.display and cell.label in ('Sales Price', 'Expenses', 'Margin', 'Profit') %}
+                            <div class="col-6">
+                                <small class="text-muted d-block">{{ cell.label }}</small>
+                                <strong class="{% if 'Margin' in cell.label and cell.raw and cell.raw < 0 %}text-danger{% elif 'Profit' in cell.label and cell.raw and cell.raw > 0 %}text-success{% endif %}">
+                                    ${{ cell.display }}
+                                </strong>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% for cell in job.cells %}
+                        {% if cell.label == 'Customer' and cell.display %}
+                        <small class="text-muted d-block mt-2"><i class="bi bi-person"></i> {{ cell.display }}</small>
+                        {% endif %}
+                        {% if cell.label == 'Salesman' and cell.display %}
+                        <small class="text-muted d-block"><i class="bi bi-person-badge"></i> {{ cell.display }}</small>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="card-footer bg-transparent text-end">
+                    <a href="{{ url_for('jobcosting.job_detail', account_id=job.id) }}"
+                       class="btn btn-sm btn-outline-primary">Details</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
 {% else %}
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> No jobs found. Make sure your Odoo instance has analytic accounts configured.
+    <i class="bi bi-info-circle"></i> No jobs found.
 </div>
 {% endif %}
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='js/jobs_dashboard.js') }}"></script>
+<script>
+var currentStatus = '{{ default_status }}';
+var currentView = localStorage.getItem('jobsView') || 'list';
+
+// --- Status Filter ---
+document.querySelectorAll('.status-filter').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        currentStatus = this.dataset.status;
+        document.querySelectorAll('.status-filter').forEach(function(b) {
+            b.classList.remove('btn-primary');
+            b.classList.add('btn-outline-primary');
+        });
+        this.classList.remove('btn-outline-primary');
+        this.classList.add('btn-primary');
+        applyFilters();
+    });
+});
+
+// --- Search ---
+var searchInput = document.getElementById('jobSearch');
+if (searchInput) {
+    searchInput.addEventListener('input', function() { applyFilters(); });
+}
+
+function applyFilters() {
+    var query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    var count = 0;
+
+    // List view rows
+    document.querySelectorAll('#jobsTable tbody tr').forEach(function(row) {
+        var status = row.dataset.status || '';
+        var text = row.textContent.toLowerCase();
+        var statusMatch = (currentStatus === 'all' || status === currentStatus);
+        var searchMatch = (!query || text.indexOf(query) !== -1);
+        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
+        if (statusMatch && searchMatch) count++;
+    });
+
+    // Card view
+    document.querySelectorAll('.job-card-wrap').forEach(function(card) {
+        var status = card.dataset.status || '';
+        var text = card.textContent.toLowerCase();
+        var statusMatch = (currentStatus === 'all' || status === currentStatus);
+        var searchMatch = (!query || text.indexOf(query) !== -1);
+        card.style.display = (statusMatch && searchMatch) ? '' : 'none';
+    });
+
+    document.getElementById('jobCount').textContent = count;
+}
+
+// --- View Toggle ---
+function setView(view) {
+    currentView = view;
+    localStorage.setItem('jobsView', view);
+    if (view === 'list') {
+        document.getElementById('listView').classList.remove('d-none');
+        document.getElementById('cardView').classList.add('d-none');
+        document.getElementById('listViewBtn').classList.add('active');
+        document.getElementById('cardViewBtn').classList.remove('active');
+        document.getElementById('colSelectorWrap').style.display = '';
+    } else {
+        document.getElementById('listView').classList.add('d-none');
+        document.getElementById('cardView').classList.remove('d-none');
+        document.getElementById('listViewBtn').classList.remove('active');
+        document.getElementById('cardViewBtn').classList.add('active');
+        document.getElementById('colSelectorWrap').style.display = 'none';
+    }
+}
+
+// --- Column Selector ---
+var savedCols = JSON.parse(localStorage.getItem('jobsCols') || 'null');
+
+document.querySelectorAll('.col-toggle').forEach(function(cb) {
+    var colIdx = parseInt(cb.dataset.col);
+
+    // Restore saved state
+    if (savedCols && savedCols[colIdx] === false) {
+        cb.checked = false;
+        toggleColumn(colIdx, false);
+    }
+
+    cb.addEventListener('change', function() {
+        toggleColumn(colIdx, this.checked);
+        saveCols();
+    });
+});
+
+function toggleColumn(colIdx, visible) {
+    var table = document.getElementById('jobsTable');
+    if (!table) return;
+    var display = visible ? '' : 'none';
+
+    // Header
+    var ths = table.querySelectorAll('thead th');
+    if (ths[colIdx]) ths[colIdx].style.display = display;
+
+    // Body cells
+    table.querySelectorAll('tbody tr').forEach(function(row) {
+        if (row.cells[colIdx]) row.cells[colIdx].style.display = display;
+    });
+}
+
+function saveCols() {
+    var state = {};
+    document.querySelectorAll('.col-toggle').forEach(function(cb) {
+        state[parseInt(cb.dataset.col)] = cb.checked;
+    });
+    localStorage.setItem('jobsCols', JSON.stringify(state));
+}
+
+// --- Sorting ---
+var headers = document.querySelectorAll('#jobsTable th.sortable');
+var tbody = document.querySelector('#jobsTable tbody');
+var currentSort = { col: -1, asc: true };
+
+if (headers && tbody) {
+    headers.forEach(function(th) {
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', function() {
+            var colIndex = parseInt(th.dataset.colIndex);
+            var sortType = th.dataset.sortType;
+            var asc = (currentSort.col === colIndex) ? !currentSort.asc : true;
+            sortTable(colIndex, sortType, asc);
+            headers.forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+            th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+            currentSort = { col: colIndex, asc: asc };
+        });
+    });
+}
+
+function sortTable(colIndex, sortType, asc) {
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+        var aVal = getCellSortValue(a, colIndex, sortType);
+        var bVal = getCellSortValue(b, colIndex, sortType);
+        if (aVal < bVal) return asc ? -1 : 1;
+        if (aVal > bVal) return asc ? 1 : -1;
+        return 0;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+function getCellSortValue(row, colIndex, sortType) {
+    var cell = row.cells[colIndex];
+    if (!cell) return '';
+    var val = cell.dataset.sortVal || cell.textContent.trim();
+    if (sortType === 'number' || sortType === 'currency' || sortType === 'percent') {
+        var num = parseFloat(String(val).replace(/[$,%,\s]/g, ''));
+        return isNaN(num) ? -Infinity : num;
+    }
+    if (sortType === 'date') {
+        return (!val || val === 'False') ? '' : val;
+    }
+    return String(val).toLowerCase();
+}
+
+// --- Init ---
+setView(currentView);
+applyFilters();
+</script>
 {% endblock %}
