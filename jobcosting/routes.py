@@ -20,6 +20,9 @@ def dashboard():
         flash(f'Cannot connect to Odoo: {e}', 'danger')
     except OdooAPIError as e:
         flash(f'Odoo error: {e}', 'danger')
+    except Exception as e:
+        flash(f'Unexpected error loading projects: {e}', 'danger')
+        current_app.logger.exception('Error in jobcosting dashboard')
 
     return render_template('jobcosting/dashboard.html', summaries=summaries)
 

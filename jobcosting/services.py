@@ -5,7 +5,7 @@ def get_analytic_accounts(odoo, domain=None):
     """List analytic accounts with balances."""
     if domain is None:
         domain = []
-    return odoo.search_read(
+    return odoo.safe_search_read(
         'account.analytic.account', domain,
         fields=['id', 'name', 'code', 'balance', 'debit', 'credit'],
         order='name asc',
@@ -14,7 +14,7 @@ def get_analytic_accounts(odoo, domain=None):
 
 def get_projects(odoo):
     """List all projects with their analytic account links."""
-    return odoo.search_read(
+    return odoo.safe_search_read(
         'project.project', [],
         fields=[
             'id', 'name', 'analytic_account_id',
@@ -26,7 +26,7 @@ def get_projects(odoo):
 
 def get_project(odoo, project_id):
     """Get a single project by ID."""
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'project.project',
         [('id', '=', project_id)],
         fields=[
@@ -39,7 +39,7 @@ def get_project(odoo, project_id):
 
 def get_tasks_for_project(odoo, project_id):
     """Get all tasks for a project with planned/effective hours."""
-    return odoo.search_read(
+    return odoo.safe_search_read(
         'project.task',
         [('project_id', '=', project_id)],
         fields=[
@@ -63,7 +63,7 @@ def get_analytic_lines(odoo, account_id=None, project_id=None,
     if date_to:
         domain.append(('date', '<=', date_to_odoo(date_to)))
 
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'account.analytic.line', domain,
         fields=[
             'id', 'name', 'date', 'amount', 'unit_amount',
@@ -82,7 +82,7 @@ def get_analytic_lines(odoo, account_id=None, project_id=None,
 
 def get_employees(odoo):
     """Get employees for dropdown selections."""
-    return odoo.search_read(
+    return odoo.safe_search_read(
         'hr.employee', [],
         fields=['id', 'name'],
         order='name asc',
@@ -284,9 +284,13 @@ def get_cost_summary_by_project(odoo):
     summaries = []
 
     for proj in projects:
-        tasks = get_tasks_for_project(odoo, proj['id'])
-        budgeted = sum(t.get('planned_hours', 0) or 0 for t in tasks)
-        actual = sum(t.get('effective_hours', 0) or 0 for t in tasks)
+        try:
+            tasks = get_tasks_for_project(odoo, proj['id'])
+            budgeted = sum(t.get('planned_hours', 0) or 0 for t in tasks)
+            actual = sum(t.get('effective_hours', 0) or 0 for t in tasks)
+        except Exception:
+            budgeted = 0
+            actual = 0
 
         # Get total cost from analytic lines
         try:

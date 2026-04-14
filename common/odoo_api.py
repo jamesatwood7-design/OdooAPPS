@@ -17,6 +17,7 @@ class OdooClient:
         self.uid = None
         self._common_proxy = None
         self._object_proxy = None
+        self._model_fields_cache = {}
 
     def _get_common_proxy(self):
         if self._common_proxy is None:
@@ -77,6 +78,8 @@ class OdooClient:
             )
         except xmlrpc.client.Fault as e:
             raise OdooAPIError(f'Odoo API error on {model}.{method}: {e.faultString}')
+        except xmlrpc.client.ProtocolError as e:
+            raise OdooConnectionError(f'Protocol error communicating with Odoo: {e}')
         except (ConnectionRefusedError, OSError) as e:
             raise OdooConnectionError(f'Lost connection to Odoo: {e}')
 
@@ -118,6 +121,33 @@ class OdooClient:
     def unlink(self, model, ids):
         """Delete records."""
         return self.execute_kw(model, 'unlink', [ids])
+
+    def fields_get(self, model, attributes=None):
+        """Get field definitions for a model. Results are cached."""
+        if model in self._model_fields_cache:
+            return self._model_fields_cache[model]
+        if attributes is None:
+            attributes = ['string', 'type']
+        result = self.execute_kw(model, 'fields_get', [], {'attributes': attributes})
+        self._model_fields_cache[model] = result
+        return result
+
+    def get_valid_fields(self, model, requested_fields):
+        """Filter a list of requested fields to only those that exist on the model."""
+        try:
+            available = self.fields_get(model)
+            return [f for f in requested_fields if f in available]
+        except Exception:
+            return requested_fields
+
+    def safe_search_read(self, model, domain, fields=None, offset=0, limit=None, order=None):
+        """Like search_read but validates fields exist first, dropping invalid ones."""
+        if fields:
+            fields = self.get_valid_fields(model, fields)
+            if not fields:
+                fields = None
+        return self.search_read(model, domain, fields=fields, offset=offset,
+                                limit=limit, order=order)
 
     def read_group(self, model, domain, fields, groupby, offset=0, limit=None, orderby=None):
         """Read grouped and aggregated data (server-side aggregation)."""

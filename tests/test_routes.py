@@ -11,7 +11,7 @@ class TestIndexRoute:
 
 class TestTimeclockRoutes:
     def test_dashboard_loads(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = [
+        mock_odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out'},
         ]
 
@@ -30,7 +30,7 @@ class TestTimeclockRoutes:
         assert resp.status_code == 302
 
     def test_toggle_with_employee(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = [
+        mock_odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
              'last_attendance_id': False},
         ]
@@ -47,7 +47,7 @@ class TestTimeclockRoutes:
         assert resp.status_code == 302
 
     def test_history_with_employee(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         with client.session_transaction() as sess:
             sess['timeclock_employee_id'] = 1
@@ -66,7 +66,7 @@ class TestTimeclockRoutes:
 
 class TestJobcostingRoutes:
     def test_dashboard_loads(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
         mock_odoo.read_group.return_value = []
 
         resp = client.get('/jobcosting/')
@@ -74,26 +74,26 @@ class TestJobcostingRoutes:
         assert b'Job Costing' in resp.data
 
     def test_accounts_page(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         resp = client.get('/jobcosting/accounts')
         assert resp.status_code == 200
 
     def test_entries_page(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         resp = client.get('/jobcosting/entries')
         assert resp.status_code == 200
 
     def test_create_entry_get(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         resp = client.get('/jobcosting/entries/create')
         assert resp.status_code == 200
         assert b'Create Entry' in resp.data
 
     def test_create_time_entry_post(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
         mock_odoo.create.return_value = 1
 
         resp = client.post('/jobcosting/entries/create', data={
@@ -112,7 +112,7 @@ class TestJobcostingRoutes:
         mock_odoo.create.assert_called_once()
 
     def test_create_entry_missing_account(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         resp = client.post('/jobcosting/entries/create', data={
             'entry_type': 'time',
@@ -126,13 +126,13 @@ class TestJobcostingRoutes:
         mock_odoo.create.assert_not_called()
 
     def test_report_list(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = []
+        mock_odoo.safe_search_read.return_value = []
 
         resp = client.get('/jobcosting/report')
         assert resp.status_code == 200
 
     def test_api_tasks(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = [
+        mock_odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Task 1', 'planned_hours': 10,
              'effective_hours': 5, 'remaining_hours': 5,
              'stage_id': [1, 'In Progress']},

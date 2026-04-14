@@ -20,6 +20,7 @@ def mock_odoo():
     odoo.uid = 1
     odoo.authenticate.return_value = 1
     odoo.search_read.return_value = []
+    odoo.safe_search_read.return_value = []
     odoo.search.return_value = []
     odoo.read.return_value = []
     odoo.create.return_value = 1
@@ -27,6 +28,8 @@ def mock_odoo():
     odoo.unlink.return_value = True
     odoo.execute_kw.return_value = True
     odoo.read_group.return_value = []
+    odoo.fields_get.return_value = {}
+    odoo.get_valid_fields.side_effect = lambda model, fields: fields
     return odoo
 
 

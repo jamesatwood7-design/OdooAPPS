@@ -18,7 +18,7 @@ def odoo():
 
 class TestGetEmployees:
     def test_get_all_employees(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out'},
             {'id': 2, 'name': 'Bob', 'attendance_state': 'checked_in'},
         ]
@@ -27,10 +27,10 @@ class TestGetEmployees:
 
         assert len(result) == 2
         assert result[0]['name'] == 'Alice'
-        odoo.search_read.assert_called_once()
+        odoo.safe_search_read.assert_called_once()
 
     def test_get_employee_found(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
              'last_attendance_id': [10, 'Attendance']},
         ]
@@ -40,7 +40,7 @@ class TestGetEmployees:
         assert result['name'] == 'Alice'
 
     def test_get_employee_not_found(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         result = get_employee(odoo, 999)
 
@@ -49,7 +49,7 @@ class TestGetEmployees:
 
 class TestAttendanceStatus:
     def test_checked_out(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
              'last_attendance_id': False},
         ]
@@ -69,7 +69,7 @@ class TestAttendanceStatus:
                 return [{'id': 10, 'check_in': '2024-01-15 08:00:00'}]
             return []
 
-        odoo.search_read.side_effect = mock_search_read
+        odoo.safe_search_read.side_effect = mock_search_read
 
         result = get_attendance_status(odoo, 1)
 
@@ -78,7 +78,7 @@ class TestAttendanceStatus:
         assert result['attendance_id'] == 10
 
     def test_employee_not_found(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         result = get_attendance_status(odoo, 999)
 
@@ -87,7 +87,7 @@ class TestAttendanceStatus:
 
 class TestToggleAttendance:
     def test_toggle_uses_action_change(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
              'last_attendance_id': False},
         ]
@@ -102,7 +102,7 @@ class TestToggleAttendance:
 
 class TestAttendanceHistory:
     def test_returns_formatted_records(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {
                 'id': 1,
                 'check_in': '2024-01-15 08:00:00',
@@ -118,7 +118,7 @@ class TestAttendanceHistory:
         assert result[0]['check_in_dt'] is not None
 
     def test_open_record_has_no_checkout(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {
                 'id': 2,
                 'check_in': '2024-01-15 08:00:00',
@@ -134,7 +134,7 @@ class TestAttendanceHistory:
 
 class TestDailySummary:
     def test_sums_hours(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'worked_hours': 4.0, 'check_in': '2024-01-15 08:00:00',
              'check_out': '2024-01-15 12:00:00'},
             {'worked_hours': 3.5, 'check_in': '2024-01-15 13:00:00',
@@ -148,7 +148,7 @@ class TestDailySummary:
         assert result['record_count'] == 2
 
     def test_empty_day(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         result = get_daily_summary(odoo, 1, date(2024, 1, 15))
 
@@ -159,7 +159,7 @@ class TestDailySummary:
 class TestWeeklySummary:
     def test_groups_by_day(self, odoo):
         # Monday Jan 15 2024
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'worked_hours': 8.0, 'check_in': '2024-01-15 08:00:00'},
             {'worked_hours': 7.5, 'check_in': '2024-01-16 08:00:00'},
         ]

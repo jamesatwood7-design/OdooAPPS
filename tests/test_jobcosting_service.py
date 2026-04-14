@@ -19,7 +19,7 @@ def odoo():
 
 class TestAnalyticAccounts:
     def test_get_all(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Acct A', 'code': 'AA', 'balance': 100.0,
              'debit': 200.0, 'credit': 100.0},
         ]
@@ -30,17 +30,17 @@ class TestAnalyticAccounts:
         assert result[0]['name'] == 'Acct A'
 
     def test_get_with_domain(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         get_analytic_accounts(odoo, domain=[('code', '=', 'X')])
 
-        call_args = odoo.search_read.call_args
+        call_args = odoo.safe_search_read.call_args
         assert ('account.analytic.account', [('code', '=', 'X')]) == call_args[0]
 
 
 class TestProjects:
     def test_get_projects(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Project Alpha',
              'analytic_account_id': [10, 'Alpha Acct'],
              'date_start': '2024-01-01', 'date': False, 'task_count': 5},
@@ -52,7 +52,7 @@ class TestProjects:
         assert result[0]['task_count'] == 5
 
     def test_get_project_found(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Project Alpha',
              'analytic_account_id': [10, 'Alpha Acct'],
              'date_start': '2024-01-01', 'date': False, 'task_count': 5},
@@ -63,7 +63,7 @@ class TestProjects:
         assert result['name'] == 'Project Alpha'
 
     def test_get_project_not_found(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         result = get_project(odoo, 999)
 
@@ -72,7 +72,7 @@ class TestProjects:
 
 class TestTasks:
     def test_get_tasks(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Task 1', 'planned_hours': 10.0,
              'effective_hours': 6.0, 'remaining_hours': 4.0,
              'stage_id': [1, 'In Progress']},
@@ -86,7 +86,7 @@ class TestTasks:
 
 class TestAnalyticLines:
     def test_get_lines_formatted(self, odoo):
-        odoo.search_read.return_value = [
+        odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Dev work', 'date': '2024-01-15',
              'amount': -150.0, 'unit_amount': 2.0,
              'employee_id': [1, 'Alice'], 'project_id': [1, 'Alpha'],
@@ -175,7 +175,7 @@ class TestProjectDetail:
                 ]
             return []
 
-        odoo.search_read.side_effect = mock_search_read
+        odoo.safe_search_read.side_effect = mock_search_read
 
         result = get_project_detail(odoo, 1)
 
@@ -186,7 +186,7 @@ class TestProjectDetail:
         assert result['totals']['variance_sign'] == 'under'
 
     def test_project_not_found(self, odoo):
-        odoo.search_read.return_value = []
+        odoo.safe_search_read.return_value = []
 
         result = get_project_detail(odoo, 999)
 
@@ -210,7 +210,7 @@ class TestJobCostReport:
                 ]
             return []
 
-        odoo.search_read.side_effect = mock_search_read
+        odoo.safe_search_read.side_effect = mock_search_read
         odoo.read_group.return_value = [
             {'task_id': [1, 'Task 1'], 'unit_amount': 45.0,
              'amount': -3375.0, '__count': 10},
@@ -226,7 +226,7 @@ class TestJobCostReport:
         assert result['totals']['variance_sign'] == 'over'
 
     def test_empty_project(self, odoo):
-        odoo.search_read.side_effect = lambda model, domain, **kw: (
+        odoo.safe_search_read.side_effect = lambda model, domain, **kw: (
             [{'id': 1, 'name': 'Empty', 'analytic_account_id': False,
               'date_start': False, 'date': False, 'task_count': 0}]
             if model == 'project.project' else []

@@ -7,7 +7,7 @@ from common.utils import (
 
 def get_all_employees(odoo):
     """Return a list of all employees with their attendance state."""
-    return odoo.search_read(
+    return odoo.safe_search_read(
         'hr.employee', [],
         fields=['id', 'name', 'attendance_state'],
         order='name asc',
@@ -16,7 +16,7 @@ def get_all_employees(odoo):
 
 def get_employee(odoo, employee_id):
     """Get a single employee record by ID."""
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'hr.employee',
         [('id', '=', employee_id)],
         fields=['id', 'name', 'attendance_state', 'last_attendance_id'],
@@ -41,7 +41,7 @@ def get_attendance_status(odoo, employee_id):
     attendance_id = None
 
     if state == 'checked_in':
-        open_records = odoo.search_read(
+        open_records = odoo.safe_search_read(
             'hr.attendance',
             [('employee_id', '=', employee_id), ('check_out', '=', False)],
             fields=['id', 'check_in'],
@@ -118,7 +118,7 @@ def get_attendance_history(odoo, employee_id, date_from=None, date_to=None, limi
         _, end_str = get_day_boundaries(date_to)
         domain.append(('check_in', '<=', end_str))
 
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'hr.attendance', domain,
         fields=['id', 'check_in', 'check_out', 'worked_hours'],
         order='check_in desc',
@@ -139,7 +139,7 @@ def get_daily_summary(odoo, employee_id, target_date=None):
         target_date = date.today()
 
     start_str, end_str = get_day_boundaries(target_date)
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'hr.attendance',
         [
             ('employee_id', '=', employee_id),
@@ -176,7 +176,7 @@ def get_weekly_summary(odoo, employee_id, target_date=None):
     start_str, _ = get_day_boundaries(monday)
     _, end_str = get_day_boundaries(sunday)
 
-    records = odoo.search_read(
+    records = odoo.safe_search_read(
         'hr.attendance',
         [
             ('employee_id', '=', employee_id),
