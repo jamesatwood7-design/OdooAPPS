@@ -166,7 +166,14 @@ function submitPin() {
     }
 
     document.getElementById('statusMsg').textContent = 'Verifying...';
-    startCamera();
+
+    // Check if camera is available (requires HTTPS on non-localhost)
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && location.protocol === 'https:') {
+        startCamera();
+    } else {
+        // No camera available - clock immediately without photo
+        clockAction('');
+    }
 }
 
 function startCamera() {
@@ -176,11 +183,19 @@ function startCamera() {
     var video = document.getElementById('cameraVideo');
     var canvas = document.getElementById('cameraCanvas');
 
+    // Timeout: if camera doesn't work in 5 seconds, proceed without photo
+    var cameraTimeout = setTimeout(function() {
+        console.warn('Camera timeout - proceeding without photo');
+        try { video.srcObject && video.srcObject.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
+        clockAction('');
+    }, 5000);
+
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 } })
         .then(function(stream) {
             video.srcObject = stream;
             // Wait 2 seconds for camera to adjust, then capture
             setTimeout(function() {
+                clearTimeout(cameraTimeout);
                 canvas.width = video.videoWidth || 320;
                 canvas.height = video.videoHeight || 240;
                 canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -194,6 +209,7 @@ function startCamera() {
             }, 2000);
         })
         .catch(function(err) {
+            clearTimeout(cameraTimeout);
             console.error('Camera error:', err);
             // Proceed without photo if camera fails
             clockAction('');
