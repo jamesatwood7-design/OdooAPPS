@@ -415,90 +415,150 @@ def get_job_dashboard_data(odoo):
     }
 
 
-def get_sales_orders(odoo, account_id):
+def _fetch_orders_by_ids(odoo, model, order_ids):
+    """Fetch sale.order or purchase.order records by IDs."""
+    if not order_ids:
+        return []
+    orders = odoo.safe_search_read(
+        model,
+        [('id', 'in', list(order_ids))],
+        fields=['id', 'name', 'partner_id', 'date_order', 'amount_total',
+                'amount_untaxed', 'state', 'invoice_status'],
+        order='date_order asc',
+    )
+    for o in orders:
+        o['partner_name'] = format_many2one(o.get('partner_id'))
+        o['display_date'] = o.get('date_order', '')
+    return orders
+
+
+def _find_orders_via_analytic_distribution(odoo, line_model, account_id):
+    """Try to find order IDs via analytic_distribution on order lines."""
+    try:
+        lines = odoo.search_read(
+            line_model,
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['order_id', 'analytic_distribution'],
+            limit=500,
+        )
+        order_ids = set()
+        for line in lines:
+            dist = line.get('analytic_distribution')
+            if isinstance(dist, dict) and str(account_id) in dist:
+                oid = line.get('order_id')
+                if isinstance(oid, (list, tuple)):
+                    order_ids.add(oid[0])
+                elif oid:
+                    order_ids.add(oid)
+        return order_ids
+    except Exception:
+        return set()
+
+
+def _find_orders_via_invoices(odoo, moves, order_model):
+    """Trace back from invoices/bills to their source orders via invoice_origin."""
+    order_names = set()
+    for move in moves:
+        origin = move.get('invoice_origin') or move.get('ref') or ''
+        if origin:
+            # invoice_origin can contain comma-separated SO/PO names
+            for name in origin.split(','):
+                name = name.strip()
+                if name:
+                    order_names.add(name)
+
+    if not order_names:
+        return set()
+
+    try:
+        # Search orders by name
+        domain = ['|'] * (len(order_names) - 1) + [
+            ('name', '=', name) for name in order_names
+        ]
+        orders = odoo.search(order_model, domain, limit=100)
+        return set(orders)
+    except Exception:
+        return set()
+
+
+def get_sales_orders(odoo, account_id, invoices=None):
     """Get Sales Orders linked to an analytic account.
 
-    Searches sale.order.line for analytic_distribution containing
-    the account ID, then fetches parent sale.order records.
+    Tries multiple strategies:
+    1. analytic_distribution on sale.order.line
+    2. Trace back from customer invoices via invoice_origin
+    3. analytic_account_id on sale.order.line (older Odoo)
     """
-    try:
-        # Find SO lines with this analytic account
-        so_lines = odoo.search_read(
-            'sale.order.line',
-            [('analytic_distribution', 'ilike', str(account_id))],
-            fields=['order_id', 'analytic_distribution'],
-            limit=500,
-        )
+    order_ids = set()
 
-        # Filter for exact match and collect unique order IDs
-        order_ids = set()
-        for line in so_lines:
-            dist = line.get('analytic_distribution')
-            if isinstance(dist, dict) and str(account_id) in dist:
+    # Strategy 1: analytic_distribution on SO lines
+    order_ids = _find_orders_via_analytic_distribution(
+        odoo, 'sale.order.line', account_id
+    )
+
+    # Strategy 2: trace from invoices
+    if not order_ids and invoices:
+        order_ids = _find_orders_via_invoices(odoo, invoices, 'sale.order')
+
+    # Strategy 3: analytic_account_id on SO lines
+    if not order_ids:
+        try:
+            lines = odoo.search_read(
+                'sale.order.line',
+                [('analytic_account_id', '=', account_id)],
+                fields=['order_id'],
+                limit=500,
+            )
+            for line in lines:
                 oid = line.get('order_id')
                 if isinstance(oid, (list, tuple)):
                     order_ids.add(oid[0])
                 elif oid:
                     order_ids.add(oid)
+        except Exception:
+            pass
 
-        if not order_ids:
-            return []
-
-        orders = odoo.safe_search_read(
-            'sale.order',
-            [('id', 'in', list(order_ids))],
-            fields=['id', 'name', 'partner_id', 'date_order', 'amount_total',
-                    'amount_untaxed', 'state', 'invoice_status'],
-            order='date_order asc',
-        )
-
-        for o in orders:
-            o['partner_name'] = format_many2one(o.get('partner_id'))
-            o['display_date'] = o.get('date_order', '')
-
-        return orders
-    except Exception:
-        return []
+    return _fetch_orders_by_ids(odoo, 'sale.order', order_ids)
 
 
-def get_purchase_orders(odoo, account_id):
-    """Get Purchase Orders linked to an analytic account."""
-    try:
-        po_lines = odoo.search_read(
-            'purchase.order.line',
-            [('analytic_distribution', 'ilike', str(account_id))],
-            fields=['order_id', 'analytic_distribution'],
-            limit=500,
-        )
+def get_purchase_orders(odoo, account_id, bills=None):
+    """Get Purchase Orders linked to an analytic account.
 
-        order_ids = set()
-        for line in po_lines:
-            dist = line.get('analytic_distribution')
-            if isinstance(dist, dict) and str(account_id) in dist:
+    Tries multiple strategies:
+    1. analytic_distribution on purchase.order.line
+    2. Trace back from vendor bills via invoice_origin
+    3. analytic_account_id on purchase.order.line
+    """
+    order_ids = set()
+
+    # Strategy 1: analytic_distribution on PO lines
+    order_ids = _find_orders_via_analytic_distribution(
+        odoo, 'purchase.order.line', account_id
+    )
+
+    # Strategy 2: trace from bills
+    if not order_ids and bills:
+        order_ids = _find_orders_via_invoices(odoo, bills, 'purchase.order')
+
+    # Strategy 3: analytic_account_id on PO lines
+    if not order_ids:
+        try:
+            lines = odoo.search_read(
+                'purchase.order.line',
+                [('analytic_account_id', '=', account_id)],
+                fields=['order_id'],
+                limit=500,
+            )
+            for line in lines:
                 oid = line.get('order_id')
                 if isinstance(oid, (list, tuple)):
                     order_ids.add(oid[0])
                 elif oid:
                     order_ids.add(oid)
+        except Exception:
+            pass
 
-        if not order_ids:
-            return []
-
-        orders = odoo.safe_search_read(
-            'purchase.order',
-            [('id', 'in', list(order_ids))],
-            fields=['id', 'name', 'partner_id', 'date_order', 'amount_total',
-                    'amount_untaxed', 'state', 'invoice_status'],
-            order='date_order asc',
-        )
-
-        for o in orders:
-            o['partner_name'] = format_many2one(o.get('partner_id'))
-            o['display_date'] = o.get('date_order', '')
-
-        return orders
-    except Exception:
-        return []
+    return _fetch_orders_by_ids(odoo, 'purchase.order', order_ids)
 
 
 def get_timesheets(odoo, account_id, limit=100):
@@ -527,8 +587,11 @@ def get_job_financials(odoo, account_id):
     Pulls from Sales Orders, Invoices, Bills, and Timesheets
     to compute a proper P&L instead of relying on custom fields.
     """
-    # Sales Orders → Contract Value
-    sales_orders = get_sales_orders(odoo, account_id)
+    # Invoices & Bills first (needed for SO/PO trace-back)
+    invoices, bills = get_account_invoices(odoo, account_id)
+
+    # Sales Orders → Contract Value (pass invoices for trace-back strategy)
+    sales_orders = get_sales_orders(odoo, account_id, invoices=invoices)
     confirmed_states = ('sale', 'done')
     original_contract = 0
     change_orders = 0
@@ -542,9 +605,6 @@ def get_job_financials(odoo, account_id):
                 change_orders += amt
 
     total_contract = original_contract + change_orders
-
-    # Invoices & Bills (already fetched with proper separation)
-    invoices, bills = get_account_invoices(odoo, account_id)
 
     invoice_total = sum(
         m.get('amount_total', 0) or 0
@@ -613,7 +673,7 @@ def get_job_financials(odoo, account_id):
         'cost_per_sqft': cost_per_sqft,
         'revenue_per_sqft': revenue_per_sqft,
         'sales_orders': sales_orders,
-        'purchase_orders': get_purchase_orders(odoo, account_id),
+        'purchase_orders': get_purchase_orders(odoo, account_id, bills=bills),
         'invoices': invoices,
         'bills': bills,
         'timesheets': timesheets[:100],
@@ -689,7 +749,7 @@ def _fetch_moves_by_ids(odoo, move_ids):
         fields=[
             'id', 'name', 'ref', 'partner_id', 'invoice_date', 'date',
             'amount_total', 'amount_residual', 'state', 'move_type',
-            'payment_state',
+            'payment_state', 'invoice_origin',
         ],
         order='invoice_date desc',
     )
