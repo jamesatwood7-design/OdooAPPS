@@ -6,9 +6,11 @@ from flask import (
 from jobcosting import bp
 from jobcosting import services
 from common.exceptions import OdooAPIError, OdooConnectionError
+from auth.routes import odoo_user_required
 
 
 @bp.route('/')
+@odoo_user_required
 def dashboard():
     """Job costing dashboard showing projects with cost summaries."""
     odoo = current_app.odoo
@@ -28,6 +30,7 @@ def dashboard():
 
 
 @bp.route('/project/<int:project_id>')
+@odoo_user_required
 def project_detail(project_id):
     """Project detail: tasks, analytic lines, budget vs actual."""
     odoo = current_app.odoo
@@ -49,6 +52,7 @@ def project_detail(project_id):
 
 
 @bp.route('/accounts')
+@odoo_user_required
 def accounts():
     """List analytic accounts with balances."""
     odoo = current_app.odoo
@@ -65,6 +69,7 @@ def accounts():
 
 
 @bp.route('/entries')
+@odoo_user_required
 def entries():
     """Browse analytic items with filters."""
     odoo = current_app.odoo
@@ -119,6 +124,7 @@ def entries():
 
 
 @bp.route('/entries/create', methods=['GET', 'POST'])
+@odoo_user_required
 def create_entry():
     """Form to create a new analytic item (time or expense entry)."""
     odoo = current_app.odoo
@@ -204,6 +210,7 @@ def create_entry():
 
 
 @bp.route('/report')
+@odoo_user_required
 def report_list():
     """Select a project to view its job cost report."""
     odoo = current_app.odoo
@@ -220,6 +227,7 @@ def report_list():
 
 
 @bp.route('/report/<int:project_id>')
+@odoo_user_required
 def report(project_id):
     """Budget vs actual report for a specific project."""
     odoo = current_app.odoo
@@ -276,6 +284,7 @@ def api_project_account(project_id):
 # ---------------------------------------------------------------------------
 
 @bp.route('/jobs')
+@odoo_user_required
 def jobs_dashboard():
     """Spreadsheet-style dashboard of all jobs (analytic accounts) with custom fields."""
     odoo = current_app.odoo
@@ -299,6 +308,7 @@ def jobs_dashboard():
 
 
 @bp.route('/job/<int:account_id>')
+@odoo_user_required
 def job_detail(account_id):
     """Full detail page for a single job (analytic account)."""
     odoo = current_app.odoo
@@ -324,6 +334,7 @@ def job_detail(account_id):
 
 
 @bp.route('/job/<int:account_id>/save', methods=['POST'])
+@odoo_user_required
 def job_save(account_id):
     """Save edited fields on an analytic account."""
     odoo = current_app.odoo

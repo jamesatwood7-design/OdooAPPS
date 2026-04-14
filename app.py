@@ -1,13 +1,18 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, redirect, url_for, session, request
 from config import Config
 from common.odoo_api import OdooClient
 from common.exceptions import OdooConnectionError, OdooAuthenticationError
+
+
+# Paths that don't require authentication
+PUBLIC_PATHS = {'/login', '/login/odoo', '/login/employee', '/logout', '/static'}
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Admin OdooClient - used for employee lookups and API calls
     odoo = OdooClient(
         url=app.config['ODOO_URL'],
         db=app.config['ODOO_DB'],
@@ -22,14 +27,35 @@ def create_app(config_class=Config):
 
     app.odoo = odoo
 
+    # Register auth blueprint
+    from auth import bp as auth_bp
+    app.register_blueprint(auth_bp)
+
     from timeclock import bp as timeclock_bp
     app.register_blueprint(timeclock_bp, url_prefix='/timeclock')
 
     from jobcosting import bp as jobcosting_bp
     app.register_blueprint(jobcosting_bp, url_prefix='/jobcosting')
 
+    @app.before_request
+    def require_login():
+        """Redirect unauthenticated users to the login page."""
+        path = request.path
+        if any(path.startswith(p) for p in PUBLIC_PATHS):
+            return None
+        if 'auth_type' not in session:
+            return redirect(url_for('auth.login'))
+        # Employee-only users can only access timeclock
+        if session.get('auth_type') == 'employee':
+            if not path.startswith('/timeclock') and path != '/':
+                return redirect(url_for('timeclock.dashboard'))
+
     @app.route('/')
     def index():
+        if 'auth_type' not in session:
+            return redirect(url_for('auth.login'))
+        if session.get('auth_type') == 'employee':
+            return redirect(url_for('timeclock.dashboard'))
         return render_template('index.html')
 
     @app.errorhandler(OdooConnectionError)

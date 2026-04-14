@@ -7,7 +7,8 @@
     <div class="col-md-8 mx-auto">
         <h2 class="mb-4"><i class="bi bi-clock"></i> Time Clock</h2>
 
-        <!-- Employee Selector -->
+        {% if session.get('auth_type') == 'odoo_user' %}
+        <!-- Employee Selector (Odoo users can view other employees) -->
         <div class="card mb-4">
             <div class="card-body">
                 <form method="POST" action="{{ url_for('timeclock.select_employee') }}" class="row g-3 align-items-end">
@@ -34,6 +35,7 @@
                 </form>
             </div>
         </div>
+        {% endif %}
 
         {% if status %}
         <!-- Attendance Status -->
@@ -95,6 +97,7 @@
                     </div>
                 </div>
             </div>
+            {% if session.get('auth_type') == 'odoo_user' %}
             <div class="col-md-4">
                 <div class="card text-center">
                     <div class="card-body">
@@ -109,6 +112,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -116,9 +120,9 @@
         <div class="alert alert-warning">
             <i class="bi bi-exclamation-triangle"></i> Could not load employee data. Please try again.
         </div>
-        {% else %}
+        {% elif session.get('auth_type') == 'odoo_user' %}
         <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> Please select an employee above to start using the time clock.
+            <i class="bi bi-info-circle"></i> Select an employee above to manage their time clock.
         </div>
         {% endif %}
     </div>

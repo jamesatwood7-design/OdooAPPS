@@ -6,6 +6,7 @@ from flask import (
 from timeclock import bp
 from timeclock import services
 from common.exceptions import OdooAPIError, OdooConnectionError
+from auth.routes import odoo_user_required
 
 
 def _is_manager_session():
@@ -86,6 +87,7 @@ def toggle_attendance():
 
 
 @bp.route('/history')
+@odoo_user_required
 def history():
     """Attendance history with date range filters."""
     employee_id = session.get('timeclock_employee_id')
@@ -139,6 +141,7 @@ def history():
 
 
 @bp.route('/summary')
+@odoo_user_required
 def summary():
     """Daily and weekly hour summaries."""
     employee_id = session.get('timeclock_employee_id')

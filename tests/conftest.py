@@ -45,3 +45,31 @@ def app(mock_odoo):
 def client(app):
     """Flask test client."""
     return app.test_client()
+
+
+@pytest.fixture
+def odoo_user_client(client):
+    """Flask test client with an Odoo user session."""
+    with client.session_transaction() as sess:
+        sess['auth_type'] = 'odoo_user'
+        sess['odoo_uid'] = 1
+        sess['employee_id'] = 1
+        sess['user_name'] = 'Test User'
+        sess['is_manager'] = True
+        sess['timeclock_employee_id'] = 1
+        sess['timeclock_is_manager'] = True
+    return client
+
+
+@pytest.fixture
+def employee_client(client):
+    """Flask test client with an employee-only session."""
+    with client.session_transaction() as sess:
+        sess['auth_type'] = 'employee'
+        sess['odoo_uid'] = None
+        sess['employee_id'] = 2
+        sess['user_name'] = 'Test Employee'
+        sess['is_manager'] = False
+        sess['timeclock_employee_id'] = 2
+        sess['timeclock_is_manager'] = False
+    return client

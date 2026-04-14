@@ -26,6 +26,7 @@
                             <i class="bi bi-clock"></i> Time Clock
                         </a>
                     </li>
+                    {% if session.get('auth_type') == 'odoo_user' %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.path == '/jobcosting/' %}active{% endif %}"
                            href="{{ url_for('jobcosting.dashboard') }}">
@@ -38,7 +39,30 @@
                             <i class="bi bi-table"></i> Jobs
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
+
+                <!-- User info + logout (right side) -->
+                {% if session.get('auth_type') %}
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <span class="nav-link text-light">
+                            <i class="bi bi-person-circle"></i>
+                            {{ session.get('user_name', '') }}
+                            {% if session.get('auth_type') == 'odoo_user' %}
+                                <span class="badge bg-primary ms-1">Odoo User</span>
+                            {% else %}
+                                <span class="badge bg-secondary ms-1">Employee</span>
+                            {% endif %}
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('auth.logout') }}">
+                            <i class="bi bi-box-arrow-right"></i> Logout
+                        </a>
+                    </li>
+                </ul>
+                {% endif %}
             </div>
         </div>
     </nav>

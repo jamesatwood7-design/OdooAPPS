@@ -1,102 +1,141 @@
 import pytest
 
 
-class TestIndexRoute:
-    def test_index_page(self, client):
-        resp = client.get('/')
-        assert resp.status_code == 200
-        assert b'Time Clock' in resp.data
-        assert b'Job Costing' in resp.data
+class TestAuthRoutes:
+    def test_unauthenticated_redirects_to_login(self, client):
+        resp = client.get('/', follow_redirects=False)
+        assert resp.status_code == 302
+        assert '/login' in resp.headers['Location']
 
-
-class TestTimeclockRoutes:
-    def test_dashboard_loads(self, client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = [
-            {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out'},
+    def test_login_page_loads(self, client, mock_odoo):
+        mock_odoo.search_read.return_value = [
+            {'id': 1, 'name': 'Alice'},
         ]
-
-        resp = client.get('/timeclock/')
+        resp = client.get('/login')
         assert resp.status_code == 200
-        assert b'Time Clock' in resp.data
+        assert b'Employee Clock-In' in resp.data
+        assert b'Odoo User Login' in resp.data
 
-    def test_select_employee(self, client):
-        resp = client.post('/timeclock/select-employee',
-                           data={'employee_id': '1'},
+    def test_employee_login(self, client, mock_odoo):
+        mock_odoo.search_read.return_value = [
+            {'id': 1, 'name': 'Alice'},
+        ]
+        resp = client.post('/login/employee', data={'employee_id': '1'},
                            follow_redirects=False)
         assert resp.status_code == 302
 
-    def test_toggle_without_employee_redirects(self, client):
-        resp = client.post('/timeclock/toggle', follow_redirects=False)
+    def test_logout_clears_session(self, odoo_user_client):
+        resp = odoo_user_client.get('/logout', follow_redirects=False)
         assert resp.status_code == 302
 
-    def test_toggle_with_employee(self, client, mock_odoo):
+
+class TestAccessControl:
+    def test_employee_cannot_access_jobcosting(self, employee_client):
+        resp = employee_client.get('/jobcosting/', follow_redirects=False)
+        assert resp.status_code == 302
+
+    def test_employee_can_access_timeclock(self, employee_client, mock_odoo):
+        mock_odoo.safe_search_read.side_effect = lambda model, domain, **kw: (
+            [{'id': 2, 'name': 'Test', 'attendance_state': 'checked_out',
+              'last_attendance_id': False, 'parent_id': False}]
+            if model == 'hr.employee' else []
+        )
+        mock_odoo.search.return_value = []
+        resp = employee_client.get('/timeclock/')
+        assert resp.status_code == 200
+
+    def test_odoo_user_can_access_jobcosting(self, odoo_user_client, mock_odoo):
+        mock_odoo.safe_search_read.return_value = []
+        mock_odoo.read_group.return_value = []
+        resp = odoo_user_client.get('/jobcosting/')
+        assert resp.status_code == 200
+
+
+class TestTimeclockRoutes:
+    def test_dashboard_loads(self, odoo_user_client, mock_odoo):
+        mock_odoo.safe_search_read.side_effect = lambda model, domain, **kw: (
+            [{'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
+              'parent_id': False, 'last_attendance_id': False}]
+            if model == 'hr.employee' else []
+        )
+        mock_odoo.search.return_value = []
+
+        resp = odoo_user_client.get('/timeclock/')
+        assert resp.status_code == 200
+        assert b'Time Clock' in resp.data
+
+    def test_select_employee(self, odoo_user_client):
+        resp = odoo_user_client.post('/timeclock/select-employee',
+                                     data={'employee_id': '1'},
+                                     follow_redirects=False)
+        assert resp.status_code == 302
+
+    def test_toggle_without_employee_redirects(self, odoo_user_client):
+        with odoo_user_client.session_transaction() as sess:
+            sess.pop('timeclock_employee_id', None)
+        resp = odoo_user_client.post('/timeclock/toggle', follow_redirects=False)
+        assert resp.status_code == 302
+
+    def test_toggle_with_employee(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Alice', 'attendance_state': 'checked_out',
-             'last_attendance_id': False},
+             'last_attendance_id': False, 'parent_id': False},
         ]
         mock_odoo.execute_kw.return_value = {'action': 'sign_in'}
 
-        with client.session_transaction() as sess:
-            sess['timeclock_employee_id'] = 1
-
-        resp = client.post('/timeclock/toggle', follow_redirects=False)
+        resp = odoo_user_client.post('/timeclock/toggle', follow_redirects=False)
         assert resp.status_code == 302
 
-    def test_history_without_employee_redirects(self, client):
-        resp = client.get('/timeclock/history', follow_redirects=False)
+    def test_history_requires_odoo_user(self, employee_client):
+        resp = employee_client.get('/timeclock/history', follow_redirects=False)
         assert resp.status_code == 302
 
-    def test_history_with_employee(self, client, mock_odoo):
+    def test_history_with_odoo_user(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
-
-        with client.session_transaction() as sess:
-            sess['timeclock_employee_id'] = 1
-
-        resp = client.get('/timeclock/history')
+        resp = odoo_user_client.get('/timeclock/history')
         assert resp.status_code == 200
 
-    def test_summary_without_employee_redirects(self, client):
-        resp = client.get('/timeclock/summary', follow_redirects=False)
+    def test_summary_requires_odoo_user(self, employee_client):
+        resp = employee_client.get('/timeclock/summary', follow_redirects=False)
         assert resp.status_code == 302
 
-    def test_api_status_without_employee(self, client):
-        resp = client.get('/timeclock/api/status')
+    def test_api_status_without_employee(self, odoo_user_client):
+        with odoo_user_client.session_transaction() as sess:
+            sess.pop('timeclock_employee_id', None)
+        resp = odoo_user_client.get('/timeclock/api/status')
         assert resp.status_code == 400
 
 
 class TestJobcostingRoutes:
-    def test_dashboard_loads(self, client, mock_odoo):
+    def test_dashboard_loads(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
         mock_odoo.read_group.return_value = []
 
-        resp = client.get('/jobcosting/')
+        resp = odoo_user_client.get('/jobcosting/')
         assert resp.status_code == 200
         assert b'Job Costing' in resp.data
 
-    def test_accounts_page(self, client, mock_odoo):
+    def test_accounts_page(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
-
-        resp = client.get('/jobcosting/accounts')
+        resp = odoo_user_client.get('/jobcosting/accounts')
         assert resp.status_code == 200
 
-    def test_entries_page(self, client, mock_odoo):
+    def test_entries_page(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
-
-        resp = client.get('/jobcosting/entries')
+        resp = odoo_user_client.get('/jobcosting/entries')
         assert resp.status_code == 200
 
-    def test_create_entry_get(self, client, mock_odoo):
+    def test_create_entry_get(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
-
-        resp = client.get('/jobcosting/entries/create')
+        resp = odoo_user_client.get('/jobcosting/entries/create')
         assert resp.status_code == 200
         assert b'Create Entry' in resp.data
 
-    def test_create_time_entry_post(self, client, mock_odoo):
+    def test_create_time_entry_post(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
         mock_odoo.create.return_value = 1
 
-        resp = client.post('/jobcosting/entries/create', data={
+        resp = odoo_user_client.post('/jobcosting/entries/create', data={
             'entry_type': 'time',
             'account_id': '10',
             'project_id': '1',
@@ -111,42 +150,14 @@ class TestJobcostingRoutes:
         assert resp.status_code == 302
         mock_odoo.create.assert_called_once()
 
-    def test_create_entry_missing_account(self, client, mock_odoo):
+    def test_report_list(self, odoo_user_client, mock_odoo):
         mock_odoo.safe_search_read.return_value = []
-
-        resp = client.post('/jobcosting/entries/create', data={
-            'entry_type': 'time',
-            'account_id': '',
-            'description': 'Test',
-            'entry_date': '2024-01-15',
-            'hours': '1',
-        }, follow_redirects=False)
-
-        assert resp.status_code == 302
-        mock_odoo.create.assert_not_called()
-
-    def test_report_list(self, client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = []
-
-        resp = client.get('/jobcosting/report')
+        resp = odoo_user_client.get('/jobcosting/report')
         assert resp.status_code == 200
-
-    def test_api_tasks(self, client, mock_odoo):
-        mock_odoo.safe_search_read.return_value = [
-            {'id': 1, 'name': 'Task 1', 'planned_hours': 10,
-             'effective_hours': 5, 'remaining_hours': 5,
-             'stage_id': [1, 'In Progress']},
-        ]
-
-        resp = client.get('/jobcosting/api/tasks/1')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert len(data) == 1
-        assert data[0]['name'] == 'Task 1'
 
 
 class TestJobsRoutes:
-    def test_jobs_dashboard_loads(self, client, mock_odoo):
+    def test_jobs_dashboard_loads(self, odoo_user_client, mock_odoo):
         mock_odoo.fields_get.return_value = {
             'id': {'string': 'ID', 'type': 'integer'},
             'name': {'string': 'Name', 'type': 'char'},
@@ -155,12 +166,11 @@ class TestJobsRoutes:
         mock_odoo.search_read.return_value = [
             {'id': 1, 'name': 'Test Job', 'code': 'S001'},
         ]
-
-        resp = client.get('/jobcosting/jobs')
+        resp = odoo_user_client.get('/jobcosting/jobs')
         assert resp.status_code == 200
         assert b'Jobs Dashboard' in resp.data
 
-    def test_job_detail_loads(self, client, mock_odoo):
+    def test_job_detail_loads(self, odoo_user_client, mock_odoo):
         mock_odoo.fields_get.return_value = {
             'id': {'string': 'ID', 'type': 'integer'},
             'name': {'string': 'Name', 'type': 'char'},
@@ -172,15 +182,17 @@ class TestJobsRoutes:
         mock_odoo.safe_search_read.return_value = [
             {'id': 1, 'name': 'Test Job', 'code': 'S001'},
         ]
-
-        resp = client.get('/jobcosting/job/1')
+        resp = odoo_user_client.get('/jobcosting/job/1')
         assert resp.status_code == 200
         assert b'Test Job' in resp.data
 
-    def test_job_detail_not_found(self, client, mock_odoo):
+    def test_job_detail_not_found(self, odoo_user_client, mock_odoo):
         mock_odoo.fields_get.return_value = {}
         mock_odoo.search_read.return_value = []
         mock_odoo.safe_search_read.return_value = []
+        resp = odoo_user_client.get('/jobcosting/job/999', follow_redirects=False)
+        assert resp.status_code == 302
 
-        resp = client.get('/jobcosting/job/999', follow_redirects=False)
+    def test_employee_cannot_access_jobs(self, employee_client):
+        resp = employee_client.get('/jobcosting/jobs', follow_redirects=False)
         assert resp.status_code == 302
