@@ -167,11 +167,11 @@ function submitPin() {
 
     document.getElementById('statusMsg').textContent = 'Verifying...';
 
-    // Check if camera is available (requires HTTPS on non-localhost)
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && location.protocol === 'https:') {
+    // Try camera if the API exists - let the browser decide if it's allowed
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         startCamera();
     } else {
-        // No camera available - clock immediately without photo
+        // No camera API at all - clock immediately without photo
         clockAction('');
     }
 }
