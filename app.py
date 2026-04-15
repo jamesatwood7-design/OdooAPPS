@@ -52,6 +52,9 @@ def create_app(config_class=Config):
     from jobcosting import bp as jobcosting_bp
     app.register_blueprint(jobcosting_bp, url_prefix='/jobcosting')
 
+    from accounting import bp as accounting_bp
+    app.register_blueprint(accounting_bp, url_prefix='/accounting')
+
     @app.before_request
     def require_login():
         """Redirect unauthenticated users to the login page."""

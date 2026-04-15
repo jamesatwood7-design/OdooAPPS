@@ -11,7 +11,8 @@ FEATURES = [
     ('jobs', 'Jobs', 'View jobs dashboard and job details'),
     ('jobs_edit', 'Job Editing', 'Edit job fields and save changes'),
     ('entries', 'Entries', 'View and create analytic entries'),
-    ('reports', 'Reports', 'View financial reports'),
+    ('reports', 'Reports', 'View job costing reports'),
+    ('accounting', 'Accounting', 'View accounting reports (P&L, Balance Sheet, etc.)'),
     ('export', 'Export', 'Export data (CSV, PDF)'),
     ('admin', 'Admin', 'Manage users and permissions'),
 ]

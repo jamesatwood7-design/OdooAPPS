@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Profit & Loss{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-graph-up-arrow"></i> Profit & Loss</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">From</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-body">
+                <table class="table table-borderless mb-0" style="font-size: 0.95rem;">
+                    <tbody>
+                        <!-- INCOME -->
+                        <tr>
+                            <td colspan="2" class="fw-bold text-uppercase pt-2 pb-1"
+                                style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                                Income
+                            </td>
+                        </tr>
+                        {% for row in data.income %}
+                        <tr>
+                            <td class="ps-3">{{ row.code }} - {{ row.name }}</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(row.amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not data.income %}
+                        <tr><td class="ps-3 text-muted" colspan="2">No income accounts</td></tr>
+                        {% endif %}
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Total Income</td>
+                            <td class="text-end fw-bold text-success">${{ '{:,.2f}'.format(data.totals.get('income', 0)) }}</td>
+                        </tr>
+
+                        <!-- EXPENSES -->
+                        <tr>
+                            <td colspan="2" class="fw-bold text-uppercase pt-4 pb-1"
+                                style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                                Expenses
+                            </td>
+                        </tr>
+                        {% for row in data.expenses %}
+                        <tr>
+                            <td class="ps-3">{{ row.code }} - {{ row.name }}</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(row.amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not data.expenses %}
+                        <tr><td class="ps-3 text-muted" colspan="2">No expense accounts</td></tr>
+                        {% endif %}
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Total Expenses</td>
+                            <td class="text-end fw-bold text-danger">${{ '{:,.2f}'.format(data.totals.get('expenses', 0)) }}</td>
+                        </tr>
+
+                        <!-- NET PROFIT -->
+                        <tr><td colspan="2" style="border-top: 3px double #000;" class="pt-3"></td></tr>
+                        <tr>
+                            <td class="fw-bold fs-5">Net Profit</td>
+                            <td class="text-end fw-bold fs-5 {% if data.totals.get('net_profit', 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                ${{ '{:,.2f}'.format(data.totals.get('net_profit', 0)) }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Profit Margin</td>
+                            <td class="text-end fw-semibold">{{ '{:.1f}'.format(data.totals.get('margin_pct', 0)) }}%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

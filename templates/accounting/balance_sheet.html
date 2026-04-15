@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Balance Sheet{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-bank"></i> Balance Sheet</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">As of Date</label>
+                <input type="date" name="as_of" class="form-control" value="{{ as_of }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-body">
+                <table class="table table-borderless mb-0" style="font-size: 0.95rem;">
+                    <tbody>
+                        <!-- ASSETS -->
+                        <tr>
+                            <td colspan="2" class="fw-bold text-uppercase pt-2 pb-1"
+                                style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                                Assets
+                            </td>
+                        </tr>
+                        {% for row in data.assets %}
+                        <tr>
+                            <td class="ps-3">{{ row.code }} - {{ row.name }}</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(row.balance) }}</td>
+                        </tr>
+                        {% endfor %}
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Total Assets</td>
+                            <td class="text-end fw-bold">${{ '{:,.2f}'.format(data.totals.get('assets', 0)) }}</td>
+                        </tr>
+
+                        <!-- LIABILITIES -->
+                        <tr>
+                            <td colspan="2" class="fw-bold text-uppercase pt-4 pb-1"
+                                style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                                Liabilities
+                            </td>
+                        </tr>
+                        {% for row in data.liabilities %}
+                        <tr>
+                            <td class="ps-3">{{ row.code }} - {{ row.name }}</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(row.balance) }}</td>
+                        </tr>
+                        {% endfor %}
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Total Liabilities</td>
+                            <td class="text-end fw-bold">${{ '{:,.2f}'.format(data.totals.get('liabilities', 0)) }}</td>
+                        </tr>
+
+                        <!-- EQUITY -->
+                        <tr>
+                            <td colspan="2" class="fw-bold text-uppercase pt-4 pb-1"
+                                style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                                Equity
+                            </td>
+                        </tr>
+                        {% for row in data.equity %}
+                        <tr>
+                            <td class="ps-3">{{ row.code }} - {{ row.name }}</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(row.balance) }}</td>
+                        </tr>
+                        {% endfor %}
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Total Equity</td>
+                            <td class="text-end fw-bold">${{ '{:,.2f}'.format(data.totals.get('equity', 0)) }}</td>
+                        </tr>
+
+                        <!-- TOTAL L+E -->
+                        <tr><td colspan="2" style="border-top: 3px double #000;" class="pt-3"></td></tr>
+                        <tr>
+                            <td class="fw-bold fs-5">Total Liabilities + Equity</td>
+                            <td class="text-end fw-bold fs-5">
+                                ${{ '{:,.2f}'.format(data.totals.get('liabilities', 0) + data.totals.get('equity', 0)) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

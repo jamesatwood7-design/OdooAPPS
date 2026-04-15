@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Trial Balance{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-journal-bookmark"></i> Trial Balance</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">From</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if data.rows %}
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0" style="font-size: 0.9rem;">
+            <thead class="table-dark">
+                <tr>
+                    <th>Code</th>
+                    <th>Account</th>
+                    <th class="text-end">Debit</th>
+                    <th class="text-end">Credit</th>
+                    <th class="text-end">Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in data.rows %}
+                <tr>
+                    <td class="fw-semibold">{{ row.code }}</td>
+                    <td>{{ row.name }}</td>
+                    <td class="text-end">{{ '${:,.2f}'.format(row.debit) if row.debit else '' }}</td>
+                    <td class="text-end">{{ '${:,.2f}'.format(row.credit) if row.credit else '' }}</td>
+                    <td class="text-end fw-bold {% if row.balance < 0 %}text-danger{% endif %}">
+                        ${{ '{:,.2f}'.format(row.balance) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot style="border-top: 3px double #000;">
+                <tr class="fw-bold fs-6">
+                    <td colspan="2">TOTALS</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.total_debit) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.total_credit) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.total_balance) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">No data for the selected period.</div>
+{% endif %}
+{% endblock %}

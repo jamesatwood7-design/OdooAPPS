@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-water"></i> Cash Flow</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">From</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
+            </div>
+            <div class="col-md-4 text-end">
+                {% if data.totals %}
+                <span class="text-success fw-bold">In: ${{ '{:,.0f}'.format(data.totals.get('inflow', 0)) }}</span>
+                <span class="mx-2">|</span>
+                <span class="text-danger fw-bold">Out: ${{ '{:,.0f}'.format(data.totals.get('outflow', 0)) }}</span>
+                <span class="mx-2">|</span>
+                <span class="fw-bold">Net: ${{ '{:,.0f}'.format(data.totals.get('net', 0)) }}</span>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if data.entries %}
+<!-- Chart -->
+<div class="card mb-4">
+    <div class="card-body">
+        <canvas id="cashChart" height="80"></canvas>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0" style="font-size: 0.9rem;">
+            <thead class="table-dark">
+                <tr>
+                    <th>Date</th>
+                    <th class="text-end">Inflow</th>
+                    <th class="text-end">Outflow</th>
+                    <th class="text-end">Net</th>
+                    <th class="text-end">Running Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in data.entries %}
+                <tr>
+                    <td>{{ e.date }}</td>
+                    <td class="text-end text-success">{{ '${:,.2f}'.format(e.inflow) if e.inflow else '' }}</td>
+                    <td class="text-end text-danger">{{ '${:,.2f}'.format(e.outflow) if e.outflow else '' }}</td>
+                    <td class="text-end fw-semibold {% if e.net >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ '{:,.2f}'.format(e.net) }}
+                    </td>
+                    <td class="text-end fw-bold">${{ '{:,.2f}'.format(e.balance) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">No cash flow data for the selected period.</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+{% if data.entries %}
+<script>
+var entries = {{ data.entries | tojson }};
+new Chart(document.getElementById('cashChart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: entries.map(function(e) { return e.date; }),
+        datasets: [{
+            label: 'Running Balance',
+            data: entries.map(function(e) { return e.balance; }),
+            borderColor: 'rgba(54, 162, 235, 1)',
+            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+            fill: true,
+            tension: 0.3
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { beginAtZero: false, title: { display: true, text: '$' } }
+        },
+        plugins: { legend: { display: false } }
+    }
+});
+</script>
+{% endif %}
+{% endblock %}
