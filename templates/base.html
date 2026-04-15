@@ -65,20 +65,34 @@
                             <i class="bi bi-bank"></i> Accounting
                         </a>
                         <ul class="dropdown-menu">
+                            <li><h6 class="dropdown-header">Reports</h6></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.pnl') }}">
                                 <i class="bi bi-graph-up-arrow"></i> Profit & Loss</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.balance_sheet') }}">
                                 <i class="bi bi-bank"></i> Balance Sheet</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.trial_balance') }}">
                                 <i class="bi bi-journal-bookmark"></i> Trial Balance</a></li>
-                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.aged_receivable') }}">
                                 <i class="bi bi-arrow-down-circle"></i> Aged Receivables</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.aged_payable') }}">
                                 <i class="bi bi-arrow-up-circle"></i> Aged Payables</a></li>
-                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.cash_flow') }}">
                                 <i class="bi bi-water"></i> Cash Flow</a></li>
+                            {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">Transactions</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_invoice') }}">
+                                <i class="bi bi-receipt"></i> Create Invoice</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_bill') }}">
+                                <i class="bi bi-file-earmark-text"></i> Create Bill</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_payment') }}">
+                                <i class="bi bi-cash-stack"></i> Record Payment</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_journal_entry') }}">
+                                <i class="bi bi-journal-plus"></i> Journal Entry</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.reconcile') }}">
+                                <i class="bi bi-check2-all"></i> Bank Reconciliation</a></li>
+                            {% endif %}
                         </ul>
                     </li>
                     {% endif %}

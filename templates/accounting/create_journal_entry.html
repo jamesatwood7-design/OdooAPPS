@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Create Journal Entry{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-journal-plus"></i> Create Journal Entry</h2>
+</div>
+
+<form method="POST">
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Journal <span class="text-danger">*</span></label>
+                    <select name="journal_id" class="form-select" required>
+                        <option value="">-- Select --</option>
+                        {% for j in journals %}
+                            <option value="{{ j.id }}">{{ j.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Date</label>
+                    <input type="date" name="entry_date" class="form-control" value="{{ today }}">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label">Reference</label>
+                    <input type="text" name="ref" class="form-control">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between">
+            <h5 class="mb-0">Journal Lines</h5>
+            <button type="button" class="btn btn-sm btn-outline-success" onclick="addJELine()">
+                <i class="bi bi-plus"></i> Add Line
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm mb-0" style="font-size: 0.85rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th>Account</th>
+                        <th>Label</th>
+                        <th>Partner</th>
+                        <th>Job</th>
+                        <th style="width:120px">Debit</th>
+                        <th style="width:120px">Credit</th>
+                        <th style="width:40px"></th>
+                    </tr>
+                </thead>
+                <tbody id="jeBody">
+                    <tr>
+                        <td><select name="je_account_0" class="form-select form-select-sm" required>
+                            <option value="">-- Account --</option>
+                            {% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} - {{ a.name }}</option>{% endfor %}
+                        </select></td>
+                        <td><input type="text" name="je_name_0" class="form-control form-control-sm"></td>
+                        <td><select name="je_partner_0" class="form-select form-select-sm"><option value="">-</option>
+                            {% for p in partners %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></td>
+                        <td><select name="je_analytic_0" class="form-select form-select-sm"><option value="">-</option>
+                            {% for a in analytics %}<option value="{{ a.id }}">{{ a.code or a.name }}</option>{% endfor %}</select></td>
+                        <td><input type="number" name="je_debit_0" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>
+                        <td><input type="number" name="je_credit_0" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcJETotal()"><i class="bi bi-trash"></i></button></td>
+                    </tr>
+                    <tr>
+                        <td><select name="je_account_1" class="form-select form-select-sm" required>
+                            <option value="">-- Account --</option>
+                            {% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} - {{ a.name }}</option>{% endfor %}
+                        </select></td>
+                        <td><input type="text" name="je_name_1" class="form-control form-control-sm"></td>
+                        <td><select name="je_partner_1" class="form-select form-select-sm"><option value="">-</option>
+                            {% for p in partners %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></td>
+                        <td><select name="je_analytic_1" class="form-select form-select-sm"><option value="">-</option>
+                            {% for a in analytics %}<option value="{{ a.id }}">{{ a.code or a.name }}</option>{% endfor %}</select></td>
+                        <td><input type="number" name="je_debit_1" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>
+                        <td><input type="number" name="je_credit_1" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcJETotal()"><i class="bi bi-trash"></i></button></td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr class="fw-bold">
+                        <td colspan="4" class="text-end">Totals:</td>
+                        <td class="text-end" id="totalDebit">$0.00</td>
+                        <td class="text-end" id="totalCredit">$0.00</td>
+                        <td></td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" class="text-end">Difference:</td>
+                        <td colspan="2" class="text-center fw-bold" id="jeDiff">$0.00</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-2">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> Create Journal Entry</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var jeCount = 2;
+var acctOptions = '';
+{% for a in accounts %}acctOptions += '<option value="{{ a.id }}">{{ a.code }} - {{ a.name }}</option>';{% endfor %}
+var partnerOptions = '';
+{% for p in partners %}partnerOptions += '<option value="{{ p.id }}">{{ p.name }}</option>';{% endfor %}
+var analyticOptions = '';
+{% for a in analytics %}analyticOptions += '<option value="{{ a.id }}">{{ a.code or a.name }}</option>';{% endfor %}
+
+function addJELine() {
+    var n = jeCount++;
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td><select name="je_account_'+n+'" class="form-select form-select-sm" required><option value="">-- Account --</option>'+acctOptions+'</select></td>' +
+        '<td><input type="text" name="je_name_'+n+'" class="form-control form-control-sm"></td>' +
+        '<td><select name="je_partner_'+n+'" class="form-select form-select-sm"><option value="">-</option>'+partnerOptions+'</select></td>' +
+        '<td><select name="je_analytic_'+n+'" class="form-select form-select-sm"><option value="">-</option>'+analyticOptions+'</select></td>' +
+        '<td><input type="number" name="je_debit_'+n+'" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>' +
+        '<td><input type="number" name="je_credit_'+n+'" class="form-control form-control-sm" step="0.01" value="0" oninput="calcJETotal()"></td>' +
+        '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'tr\').remove();calcJETotal()"><i class="bi bi-trash"></i></button></td>';
+    document.getElementById('jeBody').appendChild(tr);
+}
+
+function calcJETotal() {
+    var d = 0, c = 0;
+    document.querySelectorAll('#jeBody tr').forEach(function(tr) {
+        d += parseFloat(tr.querySelector('[name*=debit]').value) || 0;
+        c += parseFloat(tr.querySelector('[name*=credit]').value) || 0;
+    });
+    document.getElementById('totalDebit').textContent = '$' + d.toFixed(2);
+    document.getElementById('totalCredit').textContent = '$' + c.toFixed(2);
+    var diff = d - c;
+    var el = document.getElementById('jeDiff');
+    el.textContent = '$' + Math.abs(diff).toFixed(2);
+    el.className = 'text-center fw-bold ' + (Math.abs(diff) < 0.01 ? 'text-success' : 'text-danger');
+}
+calcJETotal();
+</script>
+{% endblock %}

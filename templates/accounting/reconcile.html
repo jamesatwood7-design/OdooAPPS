@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Bank Reconciliation{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-check2-all"></i> Bank Reconciliation</h2>
+</div>
+
+<!-- Journal Selector -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Bank/Cash Journal</label>
+                <select name="journal_id" class="form-select" onchange="this.form.submit()">
+                    {% for j in journals %}
+                    <option value="{{ j.id }}" {% if j.id == selected_journal %}selected{% endif %}>
+                        {{ j.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <span class="badge bg-warning text-dark fs-6">{{ unreconciled|length }} unreconciled items</span>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if unreconciled %}
+<div class="row">
+    <!-- Left: Unreconciled Bank Lines -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="bi bi-bank"></i> Bank Transactions</h5>
+            </div>
+            <div class="card-body p-0" style="max-height: 70vh; overflow-y: auto;">
+                {% for line in unreconciled %}
+                <div class="border-bottom p-3 bank-line {% if line.balance > 0 %}border-start border-3 border-success{% else %}border-start border-3 border-danger{% endif %}"
+                     data-line-id="{{ line.id }}" onclick="selectBankLine(this, {{ line.id }})" style="cursor: pointer;">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <strong>{{ line.move_name }}</strong>
+                            <br><small class="text-muted">{{ line.date }} {{ '- ' + line.partner_name if line.partner_name and line.partner_name != '-' else '' }}</small>
+                            {% if line.ref %}<br><small class="text-muted">{{ line.ref }}</small>{% endif %}
+                        </div>
+                        <div class="text-end">
+                            {% if line.balance > 0 %}
+                                <span class="text-success fw-bold fs-5">${{ '{:,.2f}'.format(line.balance) }}</span>
+                            {% else %}
+                                <span class="text-danger fw-bold fs-5">-${{ '{:,.2f}'.format(line.balance|abs) }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Suggested Matches -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-lightning"></i> Suggested Matches</h5>
+            </div>
+            <div class="card-body" id="suggestionsPanel">
+                <p class="text-muted text-center">Click a bank transaction to see suggested matches</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> All bank transactions are reconciled!
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var selectedBankLineId = null;
+var selectedMatchIds = new Set();
+
+function selectBankLine(el, lineId) {
+    document.querySelectorAll('.bank-line').forEach(function(b) {
+        b.style.backgroundColor = '';
+    });
+    el.style.backgroundColor = '#e8f0fe';
+    selectedBankLineId = lineId;
+    selectedMatchIds.clear();
+
+    var panel = document.getElementById('suggestionsPanel');
+    panel.innerHTML = '<div class="text-center"><div class="spinner-border text-primary"></div><p class="mt-2">Finding matches...</p></div>';
+
+    fetch('/accounting/reconcile/suggest/' + lineId)
+        .then(function(r) { return r.json(); })
+        .then(function(suggestions) {
+            if (!suggestions.length || suggestions.error) {
+                panel.innerHTML = '<p class="text-muted text-center">No suggested matches found.<br><small>You can search manually or skip this item.</small></p>';
+                return;
+            }
+
+            var html = '';
+            suggestions.forEach(function(s) {
+                var scoreClass = s.match_score >= 100 ? 'border-success' : (s.match_score >= 50 ? 'border-warning' : 'border-secondary');
+                var scoreLabel = s.match_score >= 100 ? 'Exact Match' : (s.match_score >= 50 ? 'Likely Match' : 'Possible');
+                var scoreBg = s.match_score >= 100 ? 'bg-success' : (s.match_score >= 50 ? 'bg-warning text-dark' : 'bg-secondary');
+
+                html += '<div class="border rounded p-2 mb-2 match-item ' + scoreClass + ' border-2" data-match-id="' + s.id + '" onclick="toggleMatch(this, ' + s.id + ')" style="cursor: pointer;">' +
+                    '<div class="d-flex justify-content-between">' +
+                    '<div>' +
+                    '<strong>' + (s.move_name || s.name || '-') + '</strong>' +
+                    '<span class="badge ' + scoreBg + ' ms-2">' + scoreLabel + '</span>' +
+                    '<br><small class="text-muted">' + s.date + ' ' + (s.partner_name && s.partner_name !== '-' ? '- ' + s.partner_name : '') + '</small>' +
+                    '</div>' +
+                    '<div class="text-end">' +
+                    '<strong class="fs-5">$' + Math.abs(s.balance).toFixed(2) + '</strong>' +
+                    '</div></div></div>';
+            });
+
+            html += '<button class="btn btn-success w-100 mt-3" id="reconcileBtn" onclick="doReconcile()" disabled>' +
+                '<i class="bi bi-check2-all"></i> Reconcile Selected</button>';
+
+            panel.innerHTML = html;
+        })
+        .catch(function(err) {
+            panel.innerHTML = '<p class="text-danger">Error loading suggestions.</p>';
+        });
+}
+
+function toggleMatch(el, matchId) {
+    if (selectedMatchIds.has(matchId)) {
+        selectedMatchIds.delete(matchId);
+        el.style.backgroundColor = '';
+    } else {
+        selectedMatchIds.add(matchId);
+        el.style.backgroundColor = '#d4edda';
+    }
+
+    var btn = document.getElementById('reconcileBtn');
+    if (btn) btn.disabled = selectedMatchIds.size === 0;
+}
+
+function doReconcile() {
+    if (!selectedBankLineId || selectedMatchIds.size === 0) return;
+
+    var lineIds = [selectedBankLineId].concat(Array.from(selectedMatchIds));
+
+    var btn = document.getElementById('reconcileBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass"></i> Reconciling...';
+
+    fetch('/accounting/reconcile/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ line_ids: lineIds })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check2-all"></i> Reconcile Selected';
+        }
+    })
+    .catch(function(err) {
+        alert('Error: ' + err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check2-all"></i> Reconcile Selected';
+    });
+}
+</script>
+{% endblock %}
