@@ -5,7 +5,7 @@ from common.exceptions import OdooConnectionError, OdooAuthenticationError
 
 
 # Paths that don't require authentication
-PUBLIC_PATHS = {'/login', '/login/odoo', '/login/employee', '/logout', '/static',
+PUBLIC_PATHS = {'/login', '/logout', '/setup', '/static',
                 '/timeclock/kiosk', '/timeclock/kiosk/clock'}
 
 
@@ -28,7 +28,21 @@ def create_app(config_class=Config):
 
     app.odoo = odoo
 
-    # Register auth blueprint
+    # Initialize Supabase client
+    if app.config.get('SUPABASE_URL') and app.config.get('SUPABASE_KEY'):
+        try:
+            from supabase import create_client
+            app.supabase = create_client(
+                app.config['SUPABASE_URL'],
+                app.config['SUPABASE_KEY'],
+            )
+        except Exception as e:
+            app.logger.warning(f'Could not initialize Supabase: {e}')
+            app.supabase = None
+    else:
+        app.supabase = None
+
+    # Register blueprints
     from auth import bp as auth_bp
     app.register_blueprint(auth_bp)
 
@@ -44,20 +58,18 @@ def create_app(config_class=Config):
         path = request.path
         if any(path.startswith(p) for p in PUBLIC_PATHS):
             return None
-        if 'auth_type' not in session:
+        if 'user_id' not in session:
             return redirect(url_for('auth.login'))
-        # Employee-only users can only access timeclock
-        if session.get('auth_type') == 'employee':
-            if not path.startswith('/timeclock') and path != '/':
-                return redirect(url_for('timeclock.dashboard'))
 
     @app.route('/')
     def index():
-        if 'auth_type' not in session:
+        if 'user_id' not in session:
             return redirect(url_for('auth.login'))
-        if session.get('auth_type') == 'employee':
-            return redirect(url_for('timeclock.dashboard'))
-        return redirect(url_for('jobcosting.jobs_dashboard'))
+        perms = session.get('permissions', {})
+        from auth.db import has_permission
+        if has_permission(perms, 'jobs', 'read'):
+            return redirect(url_for('jobcosting.jobs_dashboard'))
+        return redirect(url_for('timeclock.dashboard'))
 
     @app.errorhandler(OdooConnectionError)
     def handle_connection_error(e):

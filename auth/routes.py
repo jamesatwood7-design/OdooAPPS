@@ -4,8 +4,10 @@ from flask import (
     session, current_app,
 )
 from auth import bp
-from common.odoo_api import OdooClient
-from common.exceptions import OdooConnectionError, OdooAuthenticationError
+from auth.db import (
+    verify_user, get_user_permissions, has_permission,
+    create_user, user_count, FEATURES,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -13,22 +15,48 @@ from common.exceptions import OdooConnectionError, OdooAuthenticationError
 # ---------------------------------------------------------------------------
 
 def login_required(f):
-    """Require any authenticated session (Odoo user or employee)."""
+    """Require any authenticated session."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if 'auth_type' not in session:
+        if 'user_id' not in session:
             flash('Please log in to continue.', 'warning')
             return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
     return decorated
 
 
+def permission_required(feature, level='read'):
+    """Require a specific permission."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if 'user_id' not in session:
+                flash('Please log in to continue.', 'warning')
+                return redirect(url_for('auth.login'))
+
+            perms = session.get('permissions', {})
+            if not has_permission(perms, feature, level):
+                flash('You do not have permission to access this feature.', 'danger')
+                # Redirect to the most accessible page
+                if has_permission(perms, 'jobs', 'read'):
+                    return redirect(url_for('jobcosting.jobs_dashboard'))
+                return redirect(url_for('timeclock.dashboard'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+# Keep backward compat for existing code
 def odoo_user_required(f):
-    """Require an authenticated Odoo user session (not employee-only)."""
+    """Legacy decorator - now checks for jobs read permission."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if session.get('auth_type') != 'odoo_user':
-            flash('This feature requires an Odoo user account.', 'danger')
+        if 'user_id' not in session:
+            flash('Please log in to continue.', 'warning')
+            return redirect(url_for('auth.login'))
+        perms = session.get('permissions', {})
+        if not has_permission(perms, 'jobs', 'read'):
+            flash('You do not have permission to access this feature.', 'danger')
             return redirect(url_for('timeclock.dashboard'))
         return f(*args, **kwargs)
     return decorated
@@ -40,132 +68,124 @@ def odoo_user_required(f):
 
 @bp.route('/login', methods=['GET'])
 def login():
-    """Show the login page with dual tabs."""
-    if 'auth_type' in session:
+    """Login page."""
+    if 'user_id' in session:
         return redirect(url_for('index'))
 
-    odoo = current_app.odoo
-    employees = []
+    # Check if any users exist - if not, show setup
+    needs_setup = False
     try:
-        employees = odoo.search_read(
-            'hr.employee', [],
-            fields=['id', 'name'],
-            order='name asc',
-        )
+        needs_setup = user_count() == 0
     except Exception:
-        flash('Cannot load employee list from Odoo.', 'danger')
+        pass
 
-    return render_template('auth/login.html', employees=employees)
+    return render_template('auth/login.html', needs_setup=needs_setup)
 
 
-@bp.route('/login/odoo', methods=['POST'])
-def login_odoo():
-    """Authenticate with Odoo credentials."""
-    email = request.form.get('email', '').strip()
+@bp.route('/login', methods=['POST'])
+def login_post():
+    """Process login."""
+    username = request.form.get('username', '').strip()
     password = request.form.get('password', '')
 
-    if not email or not password:
-        flash('Please enter both email and password.', 'warning')
+    if not username or not password:
+        flash('Please enter both username and password.', 'warning')
         return redirect(url_for('auth.login'))
 
-    app = current_app
     try:
-        # Authenticate against Odoo with the user's own credentials
-        temp_client = OdooClient(
-            url=app.config['ODOO_URL'],
-            db=app.config['ODOO_DB'],
-            username=email,
-            password=password,
-        )
-        uid = temp_client.authenticate()
+        user = verify_user(username, password)
+        if not user:
+            flash('Invalid username or password.', 'danger')
+            return redirect(url_for('auth.login'))
 
-        # Look up the employee record for this Odoo user
-        admin_odoo = app.odoo
-        emp_records = admin_odoo.search_read(
-            'hr.employee',
-            [('user_id', '=', uid)],
-            fields=['id', 'name', 'parent_id'],
-        )
-
-        employee_id = None
-        employee_name = email
-        is_manager = False
-
-        if emp_records:
-            employee_id = emp_records[0]['id']
-            employee_name = emp_records[0]['name']
-            # Check if manager
-            subordinates = admin_odoo.search(
-                'hr.employee',
-                [('parent_id', '=', employee_id)],
-                limit=1,
-            )
-            is_manager = len(subordinates) > 0
+        # Load permissions
+        perms = get_user_permissions(user['id'])
 
         # Set session
-        session['auth_type'] = 'odoo_user'
-        session['odoo_uid'] = uid
-        session['employee_id'] = employee_id
-        session['user_name'] = employee_name
-        session['is_manager'] = is_manager
-        session['timeclock_employee_id'] = employee_id
-        session['timeclock_is_manager'] = is_manager
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        session['user_name'] = user['full_name']
+        session['employee_id'] = user.get('employee_id')
+        session['permissions'] = perms
+        session['timeclock_employee_id'] = user.get('employee_id')
 
-        flash(f'Welcome, {employee_name}!', 'success')
+        # Check if manager for timeclock
+        is_mgr = False
+        if user.get('employee_id') and has_permission(perms, 'time_allocation', 'read'):
+            odoo = current_app.odoo
+            try:
+                from timeclock.services import is_manager
+                is_mgr = is_manager(odoo, user['employee_id'])
+            except Exception:
+                pass
+        session['timeclock_is_manager'] = is_mgr
+        session['is_manager'] = is_mgr
+
+        # Backward compat
+        session['auth_type'] = 'odoo_user' if has_permission(perms, 'jobs', 'read') else 'employee'
+
+        flash(f'Welcome, {user["full_name"]}!', 'success')
         return redirect(url_for('index'))
 
-    except OdooAuthenticationError:
-        flash('Invalid email or password.', 'danger')
-        return redirect(url_for('auth.login'))
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-        return redirect(url_for('auth.login'))
     except Exception as e:
         flash(f'Login error: {e}', 'danger')
         return redirect(url_for('auth.login'))
 
 
-@bp.route('/login/employee', methods=['POST'])
-def login_employee():
-    """Employee self-identification (clock-in only access)."""
-    employee_id = request.form.get('employee_id', type=int)
-
-    if not employee_id:
-        flash('Please select your name.', 'warning')
-        return redirect(url_for('auth.login'))
-
-    odoo = current_app.odoo
+@bp.route('/setup', methods=['GET', 'POST'])
+def setup():
+    """First-time setup: create the initial admin user."""
     try:
-        records = odoo.search_read(
-            'hr.employee',
-            [('id', '=', employee_id)],
-            fields=['id', 'name'],
-        )
-        if not records:
-            flash('Employee not found.', 'danger')
+        if user_count() > 0:
             return redirect(url_for('auth.login'))
+    except Exception as e:
+        flash(f'Cannot connect to Supabase: {e}', 'danger')
+        return render_template('auth/setup.html')
 
-        employee_name = records[0]['name']
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        full_name = request.form.get('full_name', '').strip()
+        email = request.form.get('email', '').strip()
+        employee_id = request.form.get('employee_id', type=int)
 
-        session['auth_type'] = 'employee'
-        session['odoo_uid'] = None
-        session['employee_id'] = employee_id
-        session['user_name'] = employee_name
-        session['is_manager'] = False
-        session['timeclock_employee_id'] = employee_id
-        session['timeclock_is_manager'] = False
+        if not username or not password or not full_name:
+            flash('Please fill in all required fields.', 'warning')
+            return render_template('auth/setup.html')
 
-        flash(f'Welcome, {employee_name}!', 'success')
-        return redirect(url_for('timeclock.dashboard'))
+        try:
+            user = create_user(username, password, full_name, email, employee_id)
+            if user:
+                # Grant ALL permissions to the first user (admin)
+                from auth.db import update_user_permissions
+                all_perms = {}
+                for feature_key, _, _ in FEATURES:
+                    all_perms[feature_key] = {'read': True, 'write': True, 'delete': True}
+                update_user_permissions(user['id'], all_perms)
 
-    except OdooConnectionError as e:
-        flash(f'Cannot connect to Odoo: {e}', 'danger')
-        return redirect(url_for('auth.login'))
+                flash('Admin account created! Please log in.', 'success')
+                return redirect(url_for('auth.login'))
+            else:
+                flash('Failed to create user.', 'danger')
+        except Exception as e:
+            flash(f'Error creating user: {e}', 'danger')
+
+    # Load employees for dropdown
+    employees = []
+    try:
+        odoo = current_app.odoo
+        employees = odoo.search_read(
+            'hr.employee', [], fields=['id', 'name'], order='name asc'
+        )
+    except Exception:
+        pass
+
+    return render_template('auth/setup.html', employees=employees)
 
 
 @bp.route('/logout')
 def logout():
-    """Clear the session and redirect to login."""
+    """Clear session and redirect to login."""
     session.clear()
     flash('You have been logged out.', 'info')
     return redirect(url_for('auth.login'))

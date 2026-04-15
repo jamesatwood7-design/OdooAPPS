@@ -11,3 +11,5 @@ class Config:
     ODOO_PASSWORD = os.environ.get('ODOO_PASSWORD', 'admin')
     SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', '0') == '1'
+    SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+    SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')

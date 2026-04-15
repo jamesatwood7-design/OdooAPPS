@@ -7,22 +7,10 @@ class TestAuthRoutes:
         assert resp.status_code == 302
         assert '/login' in resp.headers['Location']
 
-    def test_login_page_loads(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = [
-            {'id': 1, 'name': 'Alice'},
-        ]
+    def test_login_page_loads(self, client):
         resp = client.get('/login')
         assert resp.status_code == 200
-        assert b'Employee Clock-In' in resp.data
-        assert b'Odoo User Login' in resp.data
-
-    def test_employee_login(self, client, mock_odoo):
-        mock_odoo.search_read.return_value = [
-            {'id': 1, 'name': 'Alice'},
-        ]
-        resp = client.post('/login/employee', data={'employee_id': '1'},
-                           follow_redirects=False)
-        assert resp.status_code == 302
+        assert b'Sign In' in resp.data
 
     def test_logout_clears_session(self, odoo_user_client):
         resp = odoo_user_client.get('/logout', follow_redirects=False)

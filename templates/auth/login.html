@@ -8,8 +8,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; }
-        .login-card { max-width: 480px; margin: 80px auto; }
-        .nav-tabs .nav-link { font-weight: 500; }
+        .login-card { max-width: 420px; margin: 100px auto; }
     </style>
 </head>
 <body>
@@ -31,64 +30,39 @@
                 {% endif %}
             {% endwith %}
 
-            <div class="card shadow-sm">
-                <div class="card-header p-0">
-                    <ul class="nav nav-tabs card-header-tabs" id="loginTabs">
-                        <li class="nav-item flex-fill text-center">
-                            <a class="nav-link active" data-bs-toggle="tab" href="#employeeTab">
-                                <i class="bi bi-person"></i> Employee Clock-In
-                            </a>
-                        </li>
-                        <li class="nav-item flex-fill text-center">
-                            <a class="nav-link" data-bs-toggle="tab" href="#odooTab">
-                                <i class="bi bi-shield-lock"></i> Odoo User Login
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-                <div class="card-body p-4">
-                    <div class="tab-content">
-                        <!-- Employee Login Tab -->
-                        <div class="tab-pane fade show active" id="employeeTab">
-                            <p class="text-muted mb-3">Select your name to clock in or out.</p>
-                            <form method="POST" action="{{ url_for('auth.login_employee') }}">
-                                <div class="mb-3">
-                                    <label for="employee_id" class="form-label">Your Name</label>
-                                    <select name="employee_id" id="employee_id" class="form-select form-select-lg" required>
-                                        <option value="">-- Select Your Name --</option>
-                                        {% for emp in employees %}
-                                            <option value="{{ emp.id }}">{{ emp.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                                <button type="submit" class="btn btn-success btn-lg w-100">
-                                    <i class="bi bi-box-arrow-in-right"></i> Continue to Clock
-                                </button>
-                            </form>
-                        </div>
+            {% if needs_setup %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> No users exist yet.
+                <a href="{{ url_for('auth.setup') }}">Create the first admin account</a>.
+            </div>
+            {% endif %}
 
-                        <!-- Odoo User Login Tab -->
-                        <div class="tab-pane fade" id="odooTab">
-                            <p class="text-muted mb-3">Log in with your Odoo account for full access.</p>
-                            <form method="POST" action="{{ url_for('auth.login_odoo') }}">
-                                <div class="mb-3">
-                                    <label for="email" class="form-label">Email</label>
-                                    <input type="email" name="email" id="email" class="form-control"
-                                           placeholder="you@company.com" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="password" class="form-label">Password</label>
-                                    <input type="password" name="password" id="password" class="form-control"
-                                           placeholder="Your Odoo password" required>
-                                </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100">
-                                    <i class="bi bi-box-arrow-in-right"></i> Log In
-                                </button>
-                            </form>
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <h5 class="mb-3 text-center">Sign In</h5>
+                    <form method="POST" action="{{ url_for('auth.login_post') }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" name="username" id="username" class="form-control"
+                                   placeholder="Enter your username" required autofocus>
                         </div>
-                    </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" name="password" id="password" class="form-control"
+                                   placeholder="Enter your password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg w-100">
+                            <i class="bi bi-box-arrow-in-right"></i> Log In
+                        </button>
+                    </form>
                 </div>
             </div>
+
+            <p class="text-center text-muted mt-3 small">
+                <a href="{{ url_for('timeclock.kiosk') }}" class="text-muted">
+                    <i class="bi bi-clock"></i> Open Kiosk Mode
+                </a>
+            </p>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

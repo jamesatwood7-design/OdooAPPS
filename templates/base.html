@@ -20,22 +20,25 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
+                    {% if session.get('permissions', {}).get('timeclock', {}).get('read') %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.path.startswith('/timeclock') %}active{% endif %}"
                            href="{{ url_for('timeclock.dashboard') }}">
                             <i class="bi bi-clock"></i> Time Clock
                         </a>
                     </li>
-                    {% if session.get('auth_type') == 'odoo_user' %}
+                    {% endif %}
+                    {% if session.get('permissions', {}).get('jobs', {}).get('read') %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.path == '/jobcosting/jobs' %}active{% endif %}"
                            href="{{ url_for('jobcosting.jobs_dashboard') }}">
                             <i class="bi bi-briefcase"></i> Jobs
                         </a>
                     </li>
+                    {% endif %}
+                    {% if session.get('permissions', {}).get('reports', {}).get('read') %}
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {% if request.path in ('/jobcosting/profitability', '/jobcosting/employee-costs', '/jobcosting/wip', '/jobcosting/compare') %}active{% endif %}"
-                           href="#" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
                             <i class="bi bi-bar-chart-line"></i> Reports
                         </a>
                         <ul class="dropdown-menu">
@@ -47,26 +50,31 @@
                                 <i class="bi bi-clipboard-data"></i> WIP Report</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.compare_jobs') }}">
                                 <i class="bi bi-arrow-left-right"></i> Job Comparison</a></li>
+                            {% if session.get('permissions', {}).get('export', {}).get('read') %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.export_data', report_type='csv') }}">
                                 <i class="bi bi-download"></i> Export Jobs CSV</a></li>
+                            {% endif %}
                         </ul>
+                    </li>
+                    {% endif %}
+                    {% if session.get('permissions', {}).get('admin', {}).get('read') %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path.startswith('/admin') %}active{% endif %}"
+                           href="{{ url_for('auth.admin_users') }}">
+                            <i class="bi bi-gear"></i> Admin
+                        </a>
                     </li>
                     {% endif %}
                 </ul>
 
                 <!-- User info + logout (right side) -->
-                {% if session.get('auth_type') %}
+                {% if session.get('user_id') %}
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
                         <span class="nav-link text-light">
                             <i class="bi bi-person-circle"></i>
                             {{ session.get('user_name', '') }}
-                            {% if session.get('auth_type') == 'odoo_user' %}
-                                <span class="badge bg-primary ms-1">Odoo User</span>
-                            {% else %}
-                                <span class="badge bg-secondary ms-1">Employee</span>
-                            {% endif %}
                         </span>
                     </li>
                     <li class="nav-item">

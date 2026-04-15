@@ -48,28 +48,41 @@ def client(app):
 
 
 @pytest.fixture
-def odoo_user_client(client):
-    """Flask test client with an Odoo user session."""
+def all_permissions():
+    """Full permissions dict for admin user."""
+    from auth.db import FEATURES
+    return {k: {'read': True, 'write': True, 'delete': True} for k, _, _ in FEATURES}
+
+
+@pytest.fixture
+def odoo_user_client(client, all_permissions):
+    """Flask test client with full admin session."""
     with client.session_transaction() as sess:
-        sess['auth_type'] = 'odoo_user'
-        sess['odoo_uid'] = 1
-        sess['employee_id'] = 1
+        sess['user_id'] = 'test-user-id'
+        sess['username'] = 'admin'
         sess['user_name'] = 'Test User'
+        sess['employee_id'] = 1
+        sess['permissions'] = all_permissions
         sess['is_manager'] = True
         sess['timeclock_employee_id'] = 1
         sess['timeclock_is_manager'] = True
+        sess['auth_type'] = 'odoo_user'
     return client
 
 
 @pytest.fixture
 def employee_client(client):
-    """Flask test client with an employee-only session."""
+    """Flask test client with employee-only permissions."""
     with client.session_transaction() as sess:
-        sess['auth_type'] = 'employee'
-        sess['odoo_uid'] = None
-        sess['employee_id'] = 2
+        sess['user_id'] = 'test-employee-id'
+        sess['username'] = 'employee'
         sess['user_name'] = 'Test Employee'
+        sess['employee_id'] = 2
+        sess['permissions'] = {
+            'timeclock': {'read': True, 'write': True, 'delete': False},
+        }
         sess['is_manager'] = False
         sess['timeclock_employee_id'] = 2
         sess['timeclock_is_manager'] = False
+        sess['auth_type'] = 'employee'
     return client
