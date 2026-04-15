@@ -156,6 +156,7 @@ def create_invoice():
                            move_type='invoice',
                            title='Create Customer Invoice',
                            partners=transactions.get_partners(odoo, 'customer'),
+                           products=transactions.get_products(odoo, sale=True),
                            accounts=transactions.get_accounts(odoo),
                            analytics=transactions.get_analytic_accounts(odoo),
                            taxes=transactions.get_taxes(odoo, 'sale'),
@@ -191,6 +192,7 @@ def create_bill():
                            move_type='bill',
                            title='Create Vendor Bill',
                            partners=transactions.get_partners(odoo, 'supplier'),
+                           products=transactions.get_products(odoo, sale=False),
                            accounts=transactions.get_accounts(odoo),
                            analytics=transactions.get_analytic_accounts(odoo),
                            taxes=transactions.get_taxes(odoo, 'purchase'),
@@ -401,19 +403,20 @@ def _parse_lines(form):
     lines = []
     i = 0
     while True:
-        name_key = f'line_name_{i}'
-        if name_key not in form:
+        # Check for either product or name based line
+        if f'line_name_{i}' not in form and f'line_product_{i}' not in form:
             break
-        name = form.get(name_key, '')
+
+        product_id = form.get(f'line_product_{i}', type=int)
+        name = form.get(f'line_name_{i}', '')
         qty = float(form.get(f'line_qty_{i}', 1) or 1)
         price = float(form.get(f'line_price_{i}', 0) or 0)
-        account_id = form.get(f'line_account_{i}', type=int)
         tax_id = form.get(f'line_tax_{i}', type=int)
 
-        if name and price:
+        if name or product_id:
             line = {'name': name, 'quantity': qty, 'price_unit': price}
-            if account_id:
-                line['account_id'] = account_id
+            if product_id:
+                line['product_id'] = product_id
             if tax_id:
                 line['tax_ids'] = [tax_id]
             lines.append(line)

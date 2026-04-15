@@ -19,14 +19,20 @@ def get_partners(odoo, partner_type=None):
     )
 
 
-def get_products(odoo):
-    """Get products for invoice/bill lines."""
-    return odoo.search_read(
-        'product.product', [],
-        fields=['id', 'name', 'list_price', 'standard_price'],
+def get_products(odoo, sale=True):
+    """Get products for invoice/bill lines with their default taxes."""
+    fields = ['id', 'name', 'list_price', 'standard_price',
+              'taxes_id', 'supplier_taxes_id', 'default_code']
+    products = odoo.safe_search_read(
+        'product.product', [('sale_ok', '=', True)] if sale else [],
+        fields=fields,
         order='name asc',
         limit=500,
     )
+    for p in products:
+        code = p.get('default_code', '')
+        p['display_name'] = f"[{code}] {p['name']}" if code else p['name']
+    return products
 
 
 def get_journals(odoo, journal_type=None):
@@ -54,15 +60,33 @@ def get_taxes(odoo, tax_type=None):
     """Get available taxes.
 
     tax_type: 'sale' for customer taxes, 'purchase' for vendor taxes
+    Filters to only show taxes of the correct type and removes duplicates.
     """
-    domain = []
+    domain = [('active', '=', True)]
     if tax_type:
-        domain = [('type_tax_use', '=', tax_type)]
-    return odoo.search_read(
+        domain.append(('type_tax_use', '=', tax_type))
+
+    taxes = odoo.search_read(
         'account.tax', domain,
-        fields=['id', 'name', 'amount', 'type_tax_use', 'price_include'],
-        order='name asc',
+        fields=['id', 'name', 'amount', 'amount_type', 'type_tax_use',
+                'price_include', 'description'],
+        order='sequence, name asc',
     )
+
+    # Build display name: use description if available, otherwise name
+    for t in taxes:
+        desc = t.get('description') or ''
+        name = t.get('name', '')
+        amt_type = t.get('amount_type', 'percent')
+
+        if amt_type == 'group':
+            t['display_name'] = name
+        elif desc:
+            t['display_name'] = f"{name} ({desc})"
+        else:
+            t['display_name'] = f"{name} ({t.get('amount', 0)}%)"
+
+    return taxes
 
 
 def get_analytic_accounts(odoo):
@@ -74,29 +98,21 @@ def get_analytic_accounts(odoo):
     )
 
 
-def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
-                   ref=None, analytic_id=None):
-    """Create a customer invoice (account.move with move_type='out_invoice').
+def _build_move_lines(lines, analytic_id=None):
+    """Build invoice_line_ids from parsed line data.
 
-    lines: [{'name': str, 'quantity': float, 'price_unit': float,
-             'account_id': int, 'tax_ids': [int, ...]}, ...]
+    When product_id is set, Odoo auto-fills account, taxes, description.
     """
-    move_vals = {
-        'move_type': 'out_invoice',
-        'partner_id': partner_id,
-        'invoice_date': invoice_date,
-        'ref': ref or '',
-    }
-    if journal_id:
-        move_vals['journal_id'] = journal_id
-
     invoice_lines = []
     for line in lines:
         line_vals = {
-            'name': line.get('name', ''),
             'quantity': line.get('quantity', 1),
             'price_unit': line.get('price_unit', 0),
         }
+        if line.get('product_id'):
+            line_vals['product_id'] = line['product_id']
+        if line.get('name'):
+            line_vals['name'] = line['name']
         if line.get('account_id'):
             line_vals['account_id'] = line['account_id']
         if line.get('tax_ids'):
@@ -105,8 +121,24 @@ def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
             line_vals['analytic_distribution'] = {str(analytic_id): 100}
 
         invoice_lines.append((0, 0, line_vals))
+    return invoice_lines
 
-    move_vals['invoice_line_ids'] = invoice_lines
+
+def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
+                   ref=None, analytic_id=None):
+    """Create a customer invoice (account.move with move_type='out_invoice').
+
+    When lines have product_id, Odoo auto-fills account, taxes, and description.
+    """
+    move_vals = {
+        'move_type': 'out_invoice',
+        'partner_id': partner_id,
+        'invoice_date': invoice_date,
+        'ref': ref or '',
+        'invoice_line_ids': _build_move_lines(lines, analytic_id),
+    }
+    if journal_id:
+        move_vals['journal_id'] = journal_id
 
     return odoo.create('account.move', move_vals)
 
@@ -119,27 +151,10 @@ def create_bill(odoo, partner_id, invoice_date, lines, journal_id=None,
         'partner_id': partner_id,
         'invoice_date': invoice_date,
         'ref': ref or '',
+        'invoice_line_ids': _build_move_lines(lines, analytic_id),
     }
     if journal_id:
         move_vals['journal_id'] = journal_id
-
-    invoice_lines = []
-    for line in lines:
-        line_vals = {
-            'name': line.get('name', ''),
-            'quantity': line.get('quantity', 1),
-            'price_unit': line.get('price_unit', 0),
-        }
-        if line.get('account_id'):
-            line_vals['account_id'] = line['account_id']
-        if line.get('tax_ids'):
-            line_vals['tax_ids'] = [(6, 0, line['tax_ids'])]
-        if analytic_id:
-            line_vals['analytic_distribution'] = {str(analytic_id): 100}
-
-        invoice_lines.append((0, 0, line_vals))
-
-    move_vals['invoice_line_ids'] = invoice_lines
 
     return odoo.create('account.move', move_vals)
 

@@ -48,33 +48,38 @@
             </button>
         </div>
         <div class="card-body p-0">
-            <table class="table table-sm mb-0">
+            <table class="table table-sm mb-0" style="font-size: 0.9rem;">
                 <thead class="table-light">
                     <tr>
+                        <th style="width: 25%">Product</th>
                         <th>Description</th>
-                        <th style="width:100px">Qty</th>
-                        <th style="width:140px">Unit Price</th>
+                        <th style="width:80px">Qty</th>
+                        <th style="width:120px">Unit Price</th>
                         <th style="width:160px">Tax</th>
-                        <th style="width:140px">Subtotal</th>
-                        <th style="width:50px"></th>
+                        <th style="width:110px">Subtotal</th>
+                        <th style="width:40px"></th>
                     </tr>
                 </thead>
                 <tbody id="linesBody">
                     <tr>
-                        <td><input type="text" name="line_name_0" class="form-control form-control-sm" required></td>
+                        <td><select name="line_product_0" class="form-select form-select-sm" onchange="onProductSelect(this, 0)">
+                            <option value="">-- No Product --</option>
+                            {% for p in products %}<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}">{{ p.display_name }}</option>{% endfor %}
+                        </select></td>
+                        <td><input type="text" name="line_name_0" class="form-control form-control-sm" placeholder="Description"></td>
                         <td><input type="number" name="line_qty_0" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>
                         <td><input type="number" name="line_price_0" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>
                         <td><select name="line_tax_0" class="form-select form-select-sm">
                             <option value="">No Tax</option>
-                            {% for t in taxes %}<option value="{{ t.id }}">{{ t.name }} ({{ t.amount }}%)</option>{% endfor %}
+                            {% for t in taxes %}<option value="{{ t.id }}">{{ t.display_name }}</option>{% endfor %}
                         </select></td>
-                        <td class="text-end line-subtotal fw-bold">$0.00</td>
+                        <td class="text-end line-subtotal fw-bold align-middle">$0.00</td>
                         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>
                     </tr>
                 </tbody>
                 <tfoot>
-                    <tr class="fw-bold fs-5">
-                        <td colspan="4" class="text-end">Subtotal (before tax):</td>
+                    <tr class="fw-bold fs-6">
+                        <td colspan="5" class="text-end">Subtotal (before tax):</td>
                         <td class="text-end" id="grandTotal">$0.00</td>
                         <td></td>
                     </tr>
@@ -92,20 +97,65 @@
 {% block extra_scripts %}
 <script>
 var lineCount = 1;
+
+// Build options strings for dynamic rows
+var productOptions = '<option value="">-- No Product --</option>';
+{% for p in products %}
+productOptions += '<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == "invoice" else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == "invoice" else p.supplier_taxes_id }}">{{ p.display_name }}</option>';
+{% endfor %}
+
 var taxOptions = '<option value="">No Tax</option>';
-{% for t in taxes %}taxOptions += '<option value="{{ t.id }}">{{ t.name }} ({{ t.amount }}%)</option>';{% endfor %}
+{% for t in taxes %}
+taxOptions += '<option value="{{ t.id }}">{{ t.display_name }}</option>';
+{% endfor %}
+
+function onProductSelect(sel, idx) {
+    var opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value) return;
+
+    var price = opt.dataset.price || '';
+    var name = opt.dataset.name || '';
+    var taxes = opt.dataset.taxes || '';
+
+    var row = sel.closest('tr');
+    var nameInput = row.querySelector('[name="line_name_' + idx + '"]');
+    var priceInput = row.querySelector('[name="line_price_' + idx + '"]');
+    var taxSelect = row.querySelector('[name="line_tax_' + idx + '"]');
+
+    if (nameInput && !nameInput.value) nameInput.value = name;
+    if (priceInput && !priceInput.value) priceInput.value = parseFloat(price) || '';
+
+    // Try to auto-select the first tax from the product's default taxes
+    if (taxSelect && taxes) {
+        try {
+            var taxIds = JSON.parse(taxes.replace(/'/g, '"'));
+            if (Array.isArray(taxIds) && taxIds.length > 0) {
+                for (var i = 0; i < taxSelect.options.length; i++) {
+                    if (parseInt(taxSelect.options[i].value) === taxIds[0]) {
+                        taxSelect.selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
+    calcTotal();
+}
 
 function addLine() {
+    var n = lineCount++;
     var tr = document.createElement('tr');
-    tr.innerHTML = '<td><input type="text" name="line_name_'+lineCount+'" class="form-control form-control-sm" required></td>' +
-        '<td><input type="number" name="line_qty_'+lineCount+'" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>' +
-        '<td><input type="number" name="line_price_'+lineCount+'" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>' +
-        '<td><select name="line_tax_'+lineCount+'" class="form-select form-select-sm">'+taxOptions+'</select></td>' +
-        '<td class="text-end line-subtotal fw-bold">$0.00</td>' +
+    tr.innerHTML = '<td><select name="line_product_'+n+'" class="form-select form-select-sm" onchange="onProductSelect(this,'+n+')">'+productOptions+'</select></td>' +
+        '<td><input type="text" name="line_name_'+n+'" class="form-control form-control-sm" placeholder="Description"></td>' +
+        '<td><input type="number" name="line_qty_'+n+'" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>' +
+        '<td><input type="number" name="line_price_'+n+'" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>' +
+        '<td><select name="line_tax_'+n+'" class="form-select form-select-sm">'+taxOptions+'</select></td>' +
+        '<td class="text-end line-subtotal fw-bold align-middle">$0.00</td>' +
         '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>';
     document.getElementById('linesBody').appendChild(tr);
-    lineCount++;
 }
+
 function calcTotal() {
     var total = 0;
     document.querySelectorAll('#linesBody tr').forEach(function(tr) {
