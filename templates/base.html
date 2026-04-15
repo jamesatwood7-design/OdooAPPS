@@ -36,12 +36,86 @@
                         </a>
                     </li>
                     {% endif %}
-                    {% if session.get('permissions', {}).get('reports', {}).get('read') %}
+
+                    {% if session.get('permissions', {}).get('accounting', {}).get('read') %}
+                    <!-- Customers -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
-                            <i class="bi bi-bar-chart-line"></i> Reports
+                            <i class="bi bi-people"></i> Customers
                         </a>
                         <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.invoice_list') }}">
+                                <i class="bi bi-receipt"></i> Invoices</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.aged_receivable') }}">
+                                <i class="bi bi-calendar3-range"></i> Aged Receivables</a></li>
+                            {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_invoice') }}">
+                                <i class="bi bi-plus-circle"></i> Create Invoice</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_payment') }}?type=inbound">
+                                <i class="bi bi-cash-stack"></i> Receive Payment</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+
+                    <!-- Vendors -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                            <i class="bi bi-truck"></i> Vendors
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.bill_list') }}">
+                                <i class="bi bi-file-earmark-text"></i> Bills</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.aged_payable') }}">
+                                <i class="bi bi-calendar3-range"></i> Aged Payables</a></li>
+                            {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_bill') }}">
+                                <i class="bi bi-plus-circle"></i> Create Bill</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_payment') }}?type=outbound">
+                                <i class="bi bi-cash-stack"></i> Send Payment</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+
+                    <!-- Accounting -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle {% if request.path.startswith('/accounting') %}active{% endif %}"
+                           href="#" data-bs-toggle="dropdown">
+                            <i class="bi bi-bank"></i> Accounting
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.trial_balance') }}">
+                                <i class="bi bi-journal-bookmark"></i> Trial Balance</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.cash_flow') }}">
+                                <i class="bi bi-water"></i> Cash Flow</a></li>
+                            {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_journal_entry') }}">
+                                <i class="bi bi-journal-plus"></i> Journal Entry</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.reconcile') }}">
+                                <i class="bi bi-check2-all"></i> Bank Reconciliation</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                    {% endif %}
+
+                    <!-- Reporting -->
+                    {% if session.get('permissions', {}).get('reports', {}).get('read') or session.get('permissions', {}).get('accounting', {}).get('read') %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                            <i class="bi bi-bar-chart-line"></i> Reporting
+                        </a>
+                        <ul class="dropdown-menu">
+                            {% if session.get('permissions', {}).get('accounting', {}).get('read') %}
+                            <li><h6 class="dropdown-header">Financial</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.pnl') }}">
+                                <i class="bi bi-graph-up-arrow"></i> Profit & Loss</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.balance_sheet') }}">
+                                <i class="bi bi-bank"></i> Balance Sheet</a></li>
+                            {% endif %}
+                            {% if session.get('permissions', {}).get('reports', {}).get('read') %}
+                            <li><h6 class="dropdown-header">Job Costing</h6></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.profitability') }}">
                                 <i class="bi bi-graph-up-arrow"></i> Profitability</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.employee_costs') }}">
@@ -50,6 +124,7 @@
                                 <i class="bi bi-clipboard-data"></i> WIP Report</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.compare_jobs') }}">
                                 <i class="bi bi-arrow-left-right"></i> Job Comparison</a></li>
+                            {% endif %}
                             {% if session.get('permissions', {}).get('export', {}).get('read') %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('jobcosting.export_data', report_type='csv') }}">
@@ -58,50 +133,7 @@
                         </ul>
                     </li>
                     {% endif %}
-                    {% if session.get('permissions', {}).get('accounting', {}).get('read') %}
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {% if request.path.startswith('/accounting') %}active{% endif %}"
-                           href="#" data-bs-toggle="dropdown">
-                            <i class="bi bi-bank"></i> Accounting
-                        </a>
-                        <ul class="dropdown-menu">
-                            <li><h6 class="dropdown-header">Reports</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.pnl') }}">
-                                <i class="bi bi-graph-up-arrow"></i> Profit & Loss</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.balance_sheet') }}">
-                                <i class="bi bi-bank"></i> Balance Sheet</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.trial_balance') }}">
-                                <i class="bi bi-journal-bookmark"></i> Trial Balance</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.aged_receivable') }}">
-                                <i class="bi bi-arrow-down-circle"></i> Aged Receivables</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.aged_payable') }}">
-                                <i class="bi bi-arrow-up-circle"></i> Aged Payables</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.cash_flow') }}">
-                                <i class="bi bi-water"></i> Cash Flow</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><h6 class="dropdown-header">Transactions</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.invoice_list') }}">
-                                <i class="bi bi-receipt"></i> Invoices</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.bill_list') }}">
-                                <i class="bi bi-file-earmark-text"></i> Bills</a></li>
-                            {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
-                            <li><hr class="dropdown-divider"></li>
-                            <li><h6 class="dropdown-header">Transactions</h6></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_invoice') }}">
-                                <i class="bi bi-receipt"></i> Create Invoice</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_bill') }}">
-                                <i class="bi bi-file-earmark-text"></i> Create Bill</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_payment') }}">
-                                <i class="bi bi-cash-stack"></i> Record Payment</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.create_journal_entry') }}">
-                                <i class="bi bi-journal-plus"></i> Journal Entry</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('accounting.reconcile') }}">
-                                <i class="bi bi-check2-all"></i> Bank Reconciliation</a></li>
-                            {% endif %}
-                        </ul>
-                    </li>
-                    {% endif %}
+
                     {% if session.get('permissions', {}).get('admin', {}).get('read') %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.path.startswith('/admin') %}active{% endif %}"
