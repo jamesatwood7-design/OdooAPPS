@@ -1,11 +1,252 @@
-/* Status Badge */
+/* ============================================
+   DA Steel Buildings - Sidebar Layout
+   ============================================ */
+
+:root {
+    --sidebar-width: 240px;
+    --sidebar-collapsed-width: 60px;
+    --sidebar-bg: #0f172a;
+    --sidebar-hover: #1e293b;
+    --sidebar-active: #2563eb;
+    --sidebar-text: #94a3b8;
+    --sidebar-text-active: #ffffff;
+    --sidebar-section: #475569;
+    --topbar-height: 52px;
+    --content-bg: #f1f5f9;
+}
+
+body {
+    background-color: var(--content-bg);
+    overflow-x: hidden;
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+    width: var(--sidebar-width);
+    height: 100vh;
+    background: var(--sidebar-bg);
+    position: fixed;
+    left: 0;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 1040;
+    transition: width 0.2s ease;
+    overflow-x: hidden;
+}
+
+.sidebar.collapsed {
+    width: var(--sidebar-collapsed-width);
+}
+
+.sidebar.collapsed .sidebar-text {
+    display: none;
+}
+
+.sidebar.collapsed .sidebar-header {
+    justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-avatar {
+    margin-right: 0;
+}
+
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 14px;
+    border-bottom: 1px solid #1e293b;
+    min-height: 60px;
+}
+
+.sidebar-brand {
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+}
+
+.sidebar-brand i {
+    font-size: 1.3rem;
+    color: #3b82f6;
+}
+
+.sidebar-toggle {
+    color: var(--sidebar-text) !important;
+    font-size: 1.2rem;
+}
+
+/* Navigation */
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 4px;
+}
+
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 16px;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+    white-space: nowrap;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-link:hover {
+    background: var(--sidebar-hover);
+    color: var(--sidebar-text-active);
+}
+
+.sidebar-link.active {
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--sidebar-text-active);
+    border-left-color: var(--sidebar-active);
+}
+
+.sidebar-link i {
+    font-size: 1.1rem;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.sidebar-section {
+    padding: 18px 16px 4px;
+}
+
+.sidebar-section-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--sidebar-section);
+    text-transform: uppercase;
+}
+
+/* User footer */
+.sidebar-footer {
+    border-top: 1px solid #1e293b;
+    padding: 12px 10px 8px;
+}
+
+.sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px;
+    margin-bottom: 4px;
+}
+
+.sidebar-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #3b82f6;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.sidebar-user-name {
+    font-size: 0.8rem;
+    color: #e2e8f0;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-logout {
+    font-size: 0.8rem;
+    color: #ef4444 !important;
+}
+
+.sidebar-logout:hover {
+    background: rgba(239, 68, 68, 0.1) !important;
+}
+
+/* ---- Main Content ---- */
+.main-content {
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    min-height: 100vh;
+    transition: margin-left 0.2s ease, width 0.2s ease;
+}
+
+.sidebar.collapsed ~ .main-content {
+    margin-left: var(--sidebar-collapsed-width);
+    width: calc(100% - var(--sidebar-collapsed-width));
+}
+
+.topbar {
+    height: var(--topbar-height);
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    position: sticky;
+    top: 0;
+    z-index: 1020;
+}
+
+.content-area {
+    padding: 24px;
+}
+
+/* Sidebar overlay for mobile */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1035;
+}
+
+.sidebar-overlay.show {
+    display: block;
+}
+
+/* ---- Cards on light bg ---- */
+.card {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.card-header {
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* ---- Component Styles ---- */
 .status-badge {
     font-size: 1.2rem;
     font-weight: 600;
     letter-spacing: 1px;
 }
 
-/* Elapsed Time Display */
 .elapsed-time {
     font-family: 'Courier New', Courier, monospace;
     font-size: 2.5rem;
@@ -13,109 +254,47 @@
     color: #198754;
 }
 
-/* App Card Hover Effect */
-.app-card {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+.app-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.app-card:hover { transform: translateY(-4px); box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.1); }
+
+.project-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.project-card:hover { transform: translateY(-2px); box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.08); }
+
+.table th { white-space: nowrap; }
+.form-label { font-weight: 500; }
+.card-header h5 { font-weight: 600; }
+
+/* Jobs Table */
+.job-table { font-size: 0.85rem; }
+.job-table td, .job-table th { padding: 0.35rem 0.5rem; vertical-align: middle; }
+.job-table thead th { user-select: none; }
+#colSelectorWrap { position: relative; z-index: 1050; }
+.job-table th.sortable:hover { background-color: #495057; cursor: pointer; }
+.job-table th.sort-asc .sort-icon::after { content: ' \25B2'; font-size: 0.7rem; }
+.job-table th.sort-desc .sort-icon::after { content: ' \25BC'; font-size: 0.7rem; }
+
+/* ---- Responsive ---- */
+@media (max-width: 991.98px) {
+    .sidebar {
+        transform: translateX(-100%);
+        width: var(--sidebar-width);
+    }
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+    }
+    .sidebar.collapsed ~ .main-content {
+        margin-left: 0;
+        width: 100%;
+    }
 }
 
-.app-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-}
-
-/* Project Card Hover */
-.project-card {
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.project-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
-}
-
-/* Table Improvements */
-.table th {
-    white-space: nowrap;
-}
-
-/* Progress bar in weekly summary */
-.progress {
-    background-color: #e9ecef;
-    border-radius: 4px;
-}
-
-/* Form styling */
-.form-label {
-    font-weight: 500;
-}
-
-/* Nav active indicator */
-.navbar-nav .nav-link.active {
-    font-weight: 600;
-    border-bottom: 2px solid #fff;
-}
-
-/* Card header consistency */
-.card-header h5 {
-    font-weight: 600;
-}
-
-/* Report variance colors */
-.text-success {
-    font-weight: 600;
-}
-
-.text-danger {
-    font-weight: 600;
-}
-
-/* Jobs Dashboard Table */
-.job-table {
-    font-size: 0.85rem;
-}
-
-.job-table td,
-.job-table th {
-    padding: 0.35rem 0.5rem;
-    vertical-align: middle;
-}
-
-.job-table thead th {
-    user-select: none;
-}
-
-#colSelectorWrap {
-    position: relative;
-    z-index: 1050;
-}
-
-.job-table th.sortable:hover {
-    background-color: #495057;
-    cursor: pointer;
-}
-
-.job-table th.sort-asc .sort-icon::after {
-    content: ' \25B2';
-    font-size: 0.7rem;
-}
-
-.job-table th.sort-desc .sort-icon::after {
-    content: ' \25BC';
-    font-size: 0.7rem;
-}
-
-/* Responsive adjustments */
 @media (max-width: 768px) {
-    .elapsed-time {
-        font-size: 1.8rem;
-    }
-
-    .status-badge {
-        font-size: 1rem;
-    }
-
-    .btn-lg {
-        font-size: 1rem;
-        padding: 0.5rem 1.5rem;
-    }
+    .content-area { padding: 16px; }
+    .elapsed-time { font-size: 1.8rem; }
+    .status-badge { font-size: 1rem; }
+    .btn-lg { font-size: 1rem; padding: 0.5rem 1.5rem; }
 }
