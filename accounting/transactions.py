@@ -292,6 +292,82 @@ def create_journal_entry(odoo, journal_id, entry_date, lines, ref=None):
     return odoo.create('account.move', vals)
 
 
+def get_moves(odoo, move_type=None, state=None, payment_state=None,
+              partner_id=None, date_from=None, date_to=None, limit=200):
+    """Get account.move records with filters."""
+    domain = []
+
+    if move_type == 'invoices':
+        domain.append(('move_type', 'in', ('out_invoice', 'out_refund')))
+    elif move_type == 'bills':
+        domain.append(('move_type', 'in', ('in_invoice', 'in_refund')))
+    elif move_type:
+        domain.append(('move_type', '=', move_type))
+
+    if state:
+        domain.append(('state', '=', state))
+    if payment_state:
+        domain.append(('payment_state', '=', payment_state))
+    if partner_id:
+        domain.append(('partner_id', '=', partner_id))
+    if date_from:
+        domain.append(('invoice_date', '>=', date_from))
+    if date_to:
+        domain.append(('invoice_date', '<=', date_to))
+
+    moves = odoo.safe_search_read(
+        'account.move', domain,
+        fields=['id', 'name', 'move_type', 'partner_id', 'invoice_date',
+                'date', 'amount_total', 'amount_residual', 'state',
+                'payment_state', 'ref', 'invoice_origin'],
+        order='invoice_date desc, id desc',
+        limit=limit,
+    )
+
+    for m in moves:
+        m['partner_name'] = format_many2one(m.get('partner_id'))
+        m['display_date'] = m.get('invoice_date') or m.get('date') or ''
+
+    return moves
+
+
+def get_move_attachments(odoo, move_id):
+    """Get all attachments for a transaction."""
+    attachments = odoo.search_read(
+        'ir.attachment',
+        [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
+        fields=['id', 'name', 'mimetype', 'file_size', 'create_date', 'type',
+                'datas'],
+        order='create_date desc',
+    )
+
+    for a in attachments:
+        size = a.get('file_size', 0) or 0
+        if size > 1048576:
+            a['size_display'] = f'{size / 1048576:.1f} MB'
+        elif size > 1024:
+            a['size_display'] = f'{size / 1024:.0f} KB'
+        else:
+            a['size_display'] = f'{size} B'
+
+        a['is_pdf'] = 'pdf' in (a.get('mimetype') or '').lower()
+        a['is_image'] = (a.get('mimetype') or '').startswith('image/')
+
+    return attachments
+
+
+def upload_attachment(odoo, move_id, filename, file_data_base64, mimetype='application/octet-stream'):
+    """Upload an attachment to a transaction."""
+    return odoo.create('ir.attachment', {
+        'name': filename,
+        'type': 'binary',
+        'datas': file_data_base64,
+        'res_model': 'account.move',
+        'res_id': move_id,
+        'mimetype': mimetype,
+    })
+
+
 def post_move(odoo, move_id):
     """Post (confirm) an account.move."""
     return odoo.execute_kw('account.move', 'action_post', [[move_id]])

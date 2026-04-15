@@ -78,6 +78,12 @@
                                 <i class="bi bi-arrow-up-circle"></i> Aged Payables</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('accounting.cash_flow') }}">
                                 <i class="bi bi-water"></i> Cash Flow</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">Transactions</h6></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.invoice_list') }}">
+                                <i class="bi bi-receipt"></i> Invoices</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('accounting.bill_list') }}">
+                                <i class="bi bi-file-earmark-text"></i> Bills</a></li>
                             {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
                             <li><hr class="dropdown-divider"></li>
                             <li><h6 class="dropdown-header">Transactions</h6></li>

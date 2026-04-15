@@ -124,6 +124,66 @@ def cash_flow():
 
 
 # ---------------------------------------------------------------------------
+# Transaction List
+# ---------------------------------------------------------------------------
+
+@bp.route('/invoices')
+@permission_required('accounting', 'read')
+def invoice_list():
+    odoo = current_app.odoo
+    state = request.args.get('state', '')
+    payment_state = request.args.get('payment_state', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+
+    moves = []
+    try:
+        moves = transactions.get_moves(
+            odoo, move_type='invoices',
+            state=state or None,
+            payment_state=payment_state or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+        )
+    except Exception as e:
+        flash(f'Error: {e}', 'danger')
+
+    return render_template('accounting/move_list.html',
+                           moves=moves, title='Customer Invoices',
+                           list_type='invoices',
+                           state=state, payment_state=payment_state,
+                           date_from=date_from, date_to=date_to)
+
+
+@bp.route('/bills')
+@permission_required('accounting', 'read')
+def bill_list():
+    odoo = current_app.odoo
+    state = request.args.get('state', '')
+    payment_state = request.args.get('payment_state', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+
+    moves = []
+    try:
+        moves = transactions.get_moves(
+            odoo, move_type='bills',
+            state=state or None,
+            payment_state=payment_state or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+        )
+    except Exception as e:
+        flash(f'Error: {e}', 'danger')
+
+    return render_template('accounting/move_list.html',
+                           moves=moves, title='Vendor Bills',
+                           list_type='bills',
+                           state=state, payment_state=payment_state,
+                           date_from=date_from, date_to=date_to)
+
+
+# ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
 
@@ -304,16 +364,71 @@ def create_journal_entry():
 def view_move(move_id):
     odoo = current_app.odoo
     move = None
+    attachments = []
     try:
         move = transactions.get_move(odoo, move_id)
         if not move:
             flash('Transaction not found.', 'warning')
             return redirect(url_for('accounting.trial_balance'))
+        attachments = transactions.get_move_attachments(odoo, move_id)
     except Exception as e:
         flash(f'Error: {e}', 'danger')
         return redirect(url_for('accounting.trial_balance'))
 
-    return render_template('accounting/view_move.html', move=move)
+    return render_template('accounting/view_move.html', move=move,
+                           attachments=attachments)
+
+
+@bp.route('/move/<int:move_id>/upload', methods=['POST'])
+@permission_required('accounting', 'write')
+def upload_attachment(move_id):
+    odoo = current_app.odoo
+    import base64
+
+    file = request.files.get('file')
+    if not file or not file.filename:
+        flash('No file selected.', 'warning')
+        return redirect(url_for('accounting.view_move', move_id=move_id))
+
+    try:
+        file_data = base64.b64encode(file.read()).decode('utf-8')
+        transactions.upload_attachment(
+            odoo, move_id, file.filename, file_data, file.mimetype
+        )
+        flash(f'"{file.filename}" uploaded successfully.', 'success')
+    except Exception as e:
+        flash(f'Upload error: {e}', 'danger')
+
+    return redirect(url_for('accounting.view_move', move_id=move_id))
+
+
+@bp.route('/attachment/<int:attachment_id>')
+@permission_required('accounting', 'read')
+def download_attachment(attachment_id):
+    """Download/view an attachment."""
+    odoo = current_app.odoo
+    import base64
+
+    try:
+        atts = odoo.search_read(
+            'ir.attachment',
+            [('id', '=', attachment_id)],
+            fields=['name', 'datas', 'mimetype'],
+        )
+        if not atts:
+            flash('Attachment not found.', 'warning')
+            return redirect(url_for('accounting.trial_balance'))
+
+        att = atts[0]
+        data = base64.b64decode(att['datas'])
+
+        response = make_response(data)
+        response.headers['Content-Type'] = att.get('mimetype', 'application/octet-stream')
+        response.headers['Content-Disposition'] = f'inline; filename="{att["name"]}"'
+        return response
+    except Exception as e:
+        flash(f'Error: {e}', 'danger')
+        return redirect(url_for('accounting.trial_balance'))
 
 
 @bp.route('/move/<int:move_id>/post', methods=['POST'])

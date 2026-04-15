@@ -17,9 +17,19 @@
             <i class="bi bi-cash-stack"></i> Register Payment
         </a>
         {% endif %}
+        {% if move.move_type in ('out_invoice', 'out_refund') %}
+        <a href="{{ url_for('accounting.invoice_list') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Invoices
+        </a>
+        {% elif move.move_type in ('in_invoice', 'in_refund') %}
+        <a href="{{ url_for('accounting.bill_list') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Bills
+        </a>
+        {% endif %}
     </div>
 </div>
 
+<!-- Transaction Header -->
 <div class="card mb-4">
     <div class="card-body">
         <div class="row">
@@ -36,66 +46,117 @@
                 <strong class="fs-5">${{ '%.2f'|format(move.amount_total or 0) }}</strong>
             </div>
             <div class="col-md-2">
+                <small class="text-muted d-block">Amount Due</small>
+                <strong class="fs-5 {% if move.amount_residual %}text-danger{% else %}text-success{% endif %}">
+                    ${{ '%.2f'|format(move.amount_residual or 0) }}
+                </strong>
+            </div>
+            <div class="col-md-1">
                 <small class="text-muted d-block">Status</small>
-                {% if move.state == 'posted' %}
-                    <span class="badge bg-success fs-6">Posted</span>
-                {% elif move.state == 'draft' %}
-                    <span class="badge bg-secondary fs-6">Draft</span>
-                {% elif move.state == 'cancel' %}
-                    <span class="badge bg-dark fs-6">Cancelled</span>
-                {% endif %}
+                {% if move.state == 'posted' %}<span class="badge bg-success">Posted</span>
+                {% elif move.state == 'draft' %}<span class="badge bg-secondary">Draft</span>
+                {% elif move.state == 'cancel' %}<span class="badge bg-dark">Cancelled</span>{% endif %}
             </div>
             <div class="col-md-2">
                 <small class="text-muted d-block">Payment</small>
-                {% if move.payment_state == 'paid' %}
-                    <span class="badge bg-success">Paid</span>
-                {% elif move.payment_state == 'partial' %}
-                    <span class="badge bg-warning text-dark">Partial</span>
-                {% elif move.payment_state == 'not_paid' %}
-                    <span class="badge bg-danger">Unpaid</span>
-                {% else %}
-                    {{ move.payment_state or '-' }}
-                {% endif %}
+                {% if move.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
+                {% elif move.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
+                {% elif move.payment_state == 'not_paid' %}<span class="badge bg-danger">Unpaid</span>
+                {% elif move.payment_state == 'in_payment' %}<span class="badge bg-info">In Payment</span>
+                {% else %}{{ move.payment_state or '-' }}{% endif %}
             </div>
-            {% if move.ref %}
-            <div class="col-md-1">
-                <small class="text-muted d-block">Ref</small>
-                {{ move.ref }}
-            </div>
-            {% endif %}
         </div>
+        {% if move.ref %}
+        <div class="mt-2">
+            <small class="text-muted">Reference: {{ move.ref }}</small>
+        </div>
+        {% endif %}
     </div>
 </div>
 
-{% if move.lines %}
-<div class="card">
-    <div class="card-header"><h5 class="mb-0">Journal Items</h5></div>
-    <div class="card-body p-0">
-        <table class="table table-sm table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>Account</th>
-                    <th>Label</th>
-                    <th class="text-end">Debit</th>
-                    <th class="text-end">Credit</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for line in move.lines %}
-                <tr>
-                    <td>
-                        {% if line.account_id %}
-                            {{ line.account_id[1] if line.account_id is iterable and line.account_id is not string else line.account_id }}
-                        {% endif %}
-                    </td>
-                    <td>{{ line.name or '-' }}</td>
-                    <td class="text-end">{{ '${:,.2f}'.format(line.debit) if line.debit else '' }}</td>
-                    <td class="text-end">{{ '${:,.2f}'.format(line.credit) if line.credit else '' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<div class="row g-4">
+    <!-- Journal Items -->
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">Journal Items</h5></div>
+            <div class="card-body p-0">
+                {% if move.lines %}
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Account</th>
+                            <th>Label</th>
+                            <th class="text-end">Debit</th>
+                            <th class="text-end">Credit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in move.lines %}
+                        <tr>
+                            <td>
+                                {% if line.account_id %}
+                                    {{ line.account_id[1] if line.account_id is iterable and line.account_id is not string else line.account_id }}
+                                {% endif %}
+                            </td>
+                            <td>{{ line.name or '-' }}</td>
+                            <td class="text-end">{{ '${:,.2f}'.format(line.debit) if line.debit else '' }}</td>
+                            <td class="text-end">{{ '${:,.2f}'.format(line.credit) if line.credit else '' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Attachments -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-paperclip"></i> Attachments</h5>
+                <span class="badge bg-secondary">{{ attachments|length }}</span>
+            </div>
+            <div class="card-body">
+                {% if attachments %}
+                <div class="list-group list-group-flush mb-3">
+                    {% for att in attachments %}
+                    <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
+                       target="_blank"
+                       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                        <div>
+                            {% if att.is_pdf %}
+                                <i class="bi bi-file-earmark-pdf text-danger"></i>
+                            {% elif att.is_image %}
+                                <i class="bi bi-file-earmark-image text-primary"></i>
+                            {% else %}
+                                <i class="bi bi-file-earmark text-secondary"></i>
+                            {% endif %}
+                            <span class="ms-1">{{ att.name }}</span>
+                            <br><small class="text-muted">{{ att.size_display }} &middot; {{ att.create_date[:10] if att.create_date else '' }}</small>
+                        </div>
+                        <i class="bi bi-download"></i>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted text-center mb-3">No attachments yet.</p>
+                {% endif %}
+
+                <!-- Upload -->
+                <form method="POST" action="{{ url_for('accounting.upload_attachment', move_id=move.id) }}"
+                      enctype="multipart/form-data">
+                    <div class="input-group input-group-sm">
+                        <input type="file" name="file" class="form-control" required
+                               accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.csv">
+                        <button type="submit" class="btn btn-outline-primary">
+                            <i class="bi bi-upload"></i> Upload
+                        </button>
+                    </div>
+                    <small class="text-muted">PDF, images, or documents</small>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
-{% endif %}
 {% endblock %}
