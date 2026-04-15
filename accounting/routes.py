@@ -4,6 +4,7 @@ from accounting import bp
 from accounting import services
 from accounting import transactions
 from auth.routes import permission_required
+from common.utils import format_many2one
 
 
 @bp.route('/trial-balance')
@@ -157,6 +158,7 @@ def create_invoice():
                            partners=transactions.get_partners(odoo, 'customer'),
                            accounts=transactions.get_accounts(odoo),
                            analytics=transactions.get_analytic_accounts(odoo),
+                           taxes=transactions.get_taxes(odoo, 'sale'),
                            today=date.today().isoformat())
 
 
@@ -191,6 +193,7 @@ def create_bill():
                            partners=transactions.get_partners(odoo, 'supplier'),
                            accounts=transactions.get_accounts(odoo),
                            analytics=transactions.get_analytic_accounts(odoo),
+                           taxes=transactions.get_taxes(odoo, 'purchase'),
                            today=date.today().isoformat())
 
 
@@ -198,31 +201,61 @@ def create_bill():
 @permission_required('accounting', 'write')
 def create_payment():
     odoo = current_app.odoo
+    move_id = request.args.get('move_id', type=int)
 
     if request.method == 'POST':
         try:
-            partner_id = request.form.get('partner_id', type=int)
             amount = request.form.get('amount', 0, type=float)
             payment_date = request.form.get('payment_date', date.today().isoformat())
-            payment_type = request.form.get('payment_type', 'inbound')
             journal_id = request.form.get('journal_id', type=int)
             ref = request.form.get('ref', '')
+            linked_move_id = request.form.get('move_id', type=int)
 
-            if not partner_id or not amount or not journal_id:
-                flash('Please fill all required fields.', 'warning')
-                return redirect(url_for('accounting.create_payment'))
+            if not amount or not journal_id:
+                flash('Please fill amount and journal.', 'warning')
+                return redirect(url_for('accounting.create_payment', move_id=linked_move_id))
 
-            transactions.create_payment(
-                odoo, partner_id, amount, payment_date, payment_type, journal_id, ref
-            )
-            flash('Payment recorded successfully.', 'success')
-            return redirect(url_for('accounting.pnl'))
+            if linked_move_id:
+                # Register payment against specific invoice/bill
+                transactions.register_payment_on_invoice(
+                    odoo, linked_move_id, journal_id, amount, payment_date, ref
+                )
+                flash('Payment registered and linked to invoice/bill.', 'success')
+                return redirect(url_for('accounting.view_move', move_id=linked_move_id))
+            else:
+                # Standalone payment
+                partner_id = request.form.get('partner_id', type=int)
+                payment_type = request.form.get('payment_type', 'inbound')
+                transactions.create_payment(
+                    odoo, partner_id, amount, payment_date, payment_type, journal_id, ref
+                )
+                flash('Payment recorded successfully.', 'success')
+                return redirect(url_for('accounting.pnl'))
+
         except Exception as e:
             flash(f'Error: {e}', 'danger')
+
+    # Pre-fill from invoice if move_id provided
+    linked_move = None
+    if move_id:
+        try:
+            linked_move = transactions.get_move(odoo, move_id)
+        except Exception:
+            pass
+
+    unpaid = []
+    try:
+        unpaid = transactions.get_unpaid_invoices(odoo)
+        for u in unpaid:
+            u['partner_name'] = format_many2one(u.get('partner_id'))
+    except Exception:
+        pass
 
     return render_template('accounting/create_payment.html',
                            partners=transactions.get_partners(odoo),
                            journals=transactions.get_bank_journals(odoo),
+                           unpaid=unpaid,
+                           linked_move=linked_move,
                            today=date.today().isoformat())
 
 
@@ -375,11 +408,14 @@ def _parse_lines(form):
         qty = float(form.get(f'line_qty_{i}', 1) or 1)
         price = float(form.get(f'line_price_{i}', 0) or 0)
         account_id = form.get(f'line_account_{i}', type=int)
+        tax_id = form.get(f'line_tax_{i}', type=int)
 
         if name and price:
             line = {'name': name, 'quantity': qty, 'price_unit': price}
             if account_id:
                 line['account_id'] = account_id
+            if tax_id:
+                line['tax_ids'] = [tax_id]
             lines.append(line)
         i += 1
     return lines

@@ -50,6 +50,21 @@ def get_accounts(odoo):
     )
 
 
+def get_taxes(odoo, tax_type=None):
+    """Get available taxes.
+
+    tax_type: 'sale' for customer taxes, 'purchase' for vendor taxes
+    """
+    domain = []
+    if tax_type:
+        domain = [('type_tax_use', '=', tax_type)]
+    return odoo.search_read(
+        'account.tax', domain,
+        fields=['id', 'name', 'amount', 'type_tax_use', 'price_include'],
+        order='name asc',
+    )
+
+
 def get_analytic_accounts(odoo):
     """Get analytic accounts for tagging transactions to jobs."""
     return odoo.search_read(
@@ -63,7 +78,8 @@ def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
                    ref=None, analytic_id=None):
     """Create a customer invoice (account.move with move_type='out_invoice').
 
-    lines: [{'name': str, 'quantity': float, 'price_unit': float, 'account_id': int}, ...]
+    lines: [{'name': str, 'quantity': float, 'price_unit': float,
+             'account_id': int, 'tax_ids': [int, ...]}, ...]
     """
     move_vals = {
         'move_type': 'out_invoice',
@@ -74,7 +90,6 @@ def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
     if journal_id:
         move_vals['journal_id'] = journal_id
 
-    # Create invoice lines
     invoice_lines = []
     for line in lines:
         line_vals = {
@@ -84,6 +99,8 @@ def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
         }
         if line.get('account_id'):
             line_vals['account_id'] = line['account_id']
+        if line.get('tax_ids'):
+            line_vals['tax_ids'] = [(6, 0, line['tax_ids'])]
         if analytic_id:
             line_vals['analytic_distribution'] = {str(analytic_id): 100}
 
@@ -115,6 +132,8 @@ def create_bill(odoo, partner_id, invoice_date, lines, journal_id=None,
         }
         if line.get('account_id'):
             line_vals['account_id'] = line['account_id']
+        if line.get('tax_ids'):
+            line_vals['tax_ids'] = [(6, 0, line['tax_ids'])]
         if analytic_id:
             line_vals['analytic_distribution'] = {str(analytic_id): 100}
 
@@ -127,7 +146,7 @@ def create_bill(odoo, partner_id, invoice_date, lines, journal_id=None,
 
 def create_payment(odoo, partner_id, amount, payment_date, payment_type,
                    journal_id, ref=None):
-    """Create a payment record.
+    """Create a standalone payment record.
 
     payment_type: 'inbound' (customer payment) or 'outbound' (vendor payment)
     """
@@ -141,7 +160,89 @@ def create_payment(odoo, partner_id, amount, payment_date, payment_type,
         'ref': ref or '',
     }
 
-    return odoo.create('account.payment', vals)
+    payment_id = odoo.create('account.payment', vals)
+
+    # Auto-post the payment
+    try:
+        odoo.execute_kw('account.payment', 'action_post', [[payment_id]])
+    except Exception:
+        pass
+
+    return payment_id
+
+
+def register_payment_on_invoice(odoo, move_id, journal_id, amount, payment_date,
+                                ref=None):
+    """Register a payment against a specific invoice or bill.
+
+    Uses Odoo's account.payment.register wizard which automatically
+    reconciles the payment with the invoice.
+    """
+    # Get the invoice to determine payment type
+    move = odoo.search_read(
+        'account.move', [('id', '=', move_id)],
+        fields=['move_type', 'partner_id', 'amount_residual'],
+    )
+    if not move:
+        raise ValueError('Invoice/bill not found')
+
+    move = move[0]
+    move_type = move.get('move_type', '')
+
+    if move_type in ('out_invoice', 'out_refund'):
+        payment_type = 'inbound'
+        partner_type = 'customer'
+    else:
+        payment_type = 'outbound'
+        partner_type = 'supplier'
+
+    partner_val = move.get('partner_id')
+    partner_id = partner_val[0] if isinstance(partner_val, (list, tuple)) else partner_val
+
+    # Create payment linked to the invoice context
+    # Use the payment register wizard
+    try:
+        ctx = {'active_model': 'account.move', 'active_ids': [move_id]}
+        wizard_id = odoo.execute_kw(
+            'account.payment.register', 'create',
+            [{'journal_id': journal_id, 'amount': amount, 'payment_date': payment_date,
+              'communication': ref or ''}],
+            {'context': ctx},
+        )
+        odoo.execute_kw(
+            'account.payment.register', 'action_create_payments',
+            [[wizard_id]],
+            {'context': ctx},
+        )
+        return wizard_id
+    except Exception:
+        # Fallback: create standalone payment
+        return create_payment(
+            odoo, partner_id, amount, payment_date, payment_type, journal_id, ref
+        )
+
+
+def get_unpaid_invoices(odoo, partner_type=None):
+    """Get unpaid/partially paid invoices and bills."""
+    domain = [
+        ('state', '=', 'posted'),
+        ('payment_state', 'in', ('not_paid', 'partial')),
+        ('amount_residual', '>', 0),
+    ]
+    if partner_type == 'customer':
+        domain.append(('move_type', 'in', ('out_invoice',)))
+    elif partner_type == 'supplier':
+        domain.append(('move_type', 'in', ('in_invoice',)))
+    else:
+        domain.append(('move_type', 'in', ('out_invoice', 'in_invoice')))
+
+    return odoo.safe_search_read(
+        'account.move', domain,
+        fields=['id', 'name', 'partner_id', 'invoice_date', 'amount_total',
+                'amount_residual', 'move_type', 'ref'],
+        order='invoice_date desc',
+        limit=200,
+    )
 
 
 def create_journal_entry(odoo, journal_id, entry_date, lines, ref=None):

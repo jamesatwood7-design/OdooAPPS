@@ -54,6 +54,7 @@
                         <th>Description</th>
                         <th style="width:100px">Qty</th>
                         <th style="width:140px">Unit Price</th>
+                        <th style="width:160px">Tax</th>
                         <th style="width:140px">Subtotal</th>
                         <th style="width:50px"></th>
                     </tr>
@@ -63,13 +64,17 @@
                         <td><input type="text" name="line_name_0" class="form-control form-control-sm" required></td>
                         <td><input type="number" name="line_qty_0" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>
                         <td><input type="number" name="line_price_0" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>
+                        <td><select name="line_tax_0" class="form-select form-select-sm">
+                            <option value="">No Tax</option>
+                            {% for t in taxes %}<option value="{{ t.id }}">{{ t.name }} ({{ t.amount }}%)</option>{% endfor %}
+                        </select></td>
                         <td class="text-end line-subtotal fw-bold">$0.00</td>
                         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>
                     </tr>
                 </tbody>
                 <tfoot>
                     <tr class="fw-bold fs-5">
-                        <td colspan="3" class="text-end">Total:</td>
+                        <td colspan="4" class="text-end">Subtotal (before tax):</td>
                         <td class="text-end" id="grandTotal">$0.00</td>
                         <td></td>
                     </tr>
@@ -87,11 +92,15 @@
 {% block extra_scripts %}
 <script>
 var lineCount = 1;
+var taxOptions = '<option value="">No Tax</option>';
+{% for t in taxes %}taxOptions += '<option value="{{ t.id }}">{{ t.name }} ({{ t.amount }}%)</option>';{% endfor %}
+
 function addLine() {
     var tr = document.createElement('tr');
     tr.innerHTML = '<td><input type="text" name="line_name_'+lineCount+'" class="form-control form-control-sm" required></td>' +
         '<td><input type="number" name="line_qty_'+lineCount+'" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>' +
         '<td><input type="number" name="line_price_'+lineCount+'" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>' +
+        '<td><select name="line_tax_'+lineCount+'" class="form-select form-select-sm">'+taxOptions+'</select></td>' +
         '<td class="text-end line-subtotal fw-bold">$0.00</td>' +
         '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>';
     document.getElementById('linesBody').appendChild(tr);

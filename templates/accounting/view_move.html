@@ -12,6 +12,11 @@
             </button>
         </form>
         {% endif %}
+        {% if move.state == 'posted' and move.payment_state in ('not_paid', 'partial') and move.amount_residual %}
+        <a href="{{ url_for('accounting.create_payment', move_id=move.id) }}" class="btn btn-primary me-2">
+            <i class="bi bi-cash-stack"></i> Register Payment
+        </a>
+        {% endif %}
     </div>
 </div>
 
