@@ -7,6 +7,8 @@ from jobcosting.services import (
     get_tasks_for_project, get_analytic_lines,
     create_time_entry, create_expense_entry,
     get_project_detail, get_job_cost_report,
+    _po_lines_for_analytic, _bill_lines_for_analytic,
+    get_purchase_orders, PO_OPEN_STATES,
 )
 
 
@@ -238,3 +240,192 @@ class TestJobCostReport:
         assert result is not None
         assert result['totals']['budgeted_hours'] == 0
         assert result['totals']['actual_hours'] == 0
+
+
+class TestPOLinesForAnalytic:
+    def test_single_full_attribution(self, odoo):
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 10.0, 'qty_invoiced': 2.0, 'price_unit': 50.0,
+            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert len(result) == 1
+        line = result[0]
+        assert line['distribution_pct'] == 100.0
+        assert line['attributed_amount'] == 500.0
+        # (10 - 2) * 50 * 1.0
+        assert line['committed_amount'] == 400.0
+
+    def test_partial_attribution_respects_pct(self, odoo):
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 100.0,
+            'price_subtotal': 1000.0,
+            'analytic_distribution': {'24': 60.0, '25': 40.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert len(result) == 1
+        line = result[0]
+        assert line['distribution_pct'] == 60.0
+        # 1000 * 0.6
+        assert line['attributed_amount'] == 600.0
+        # 10 * 100 * 0.6
+        assert line['committed_amount'] == 600.0
+
+    def test_rejects_ilike_false_positive(self, odoo):
+        # account id 24 would substring-match "242" under ilike but the
+        # dict-key check must reject it.
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 1.0, 'qty_invoiced': 0.0, 'price_unit': 10.0,
+            'price_subtotal': 10.0,
+            'analytic_distribution': {'242': 100.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert result == []
+
+    def test_domain_filters_by_state_and_key(self, odoo):
+        odoo.search_read.return_value = []
+
+        _po_lines_for_analytic(odoo, 24)
+
+        call = odoo.search_read.call_args
+        assert call[0][0] == 'purchase.order.line'
+        domain = call[0][1]
+        assert ('order_id.state', 'in', list(PO_OPEN_STATES)) in domain
+        assert ('analytic_distribution', 'ilike', '24') in domain
+
+    def test_fully_invoiced_line_has_zero_committed(self, odoo):
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 5.0, 'qty_invoiced': 5.0, 'price_unit': 100.0,
+            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert result[0]['committed_amount'] == 0.0
+
+    def test_over_invoiced_clamped_to_zero(self, odoo):
+        # qty_invoiced > product_qty should not yield a negative commitment
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 5.0, 'qty_invoiced': 7.0, 'price_unit': 100.0,
+            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert result[0]['committed_amount'] == 0.0
+
+    def test_zero_pct_is_dropped(self, odoo):
+        odoo.search_read.return_value = [{
+            'id': 11, 'order_id': (100, 'PO100'),
+            'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 50.0,
+            'price_subtotal': 500.0, 'analytic_distribution': {'24': 0.0},
+        }]
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert result == []
+
+
+class TestBillLinesForAnalytic:
+    def test_attribution_and_refund_flag(self, odoo):
+        def fake_search_read(model, domain, **kw):
+            if model == 'account.move.line':
+                return [
+                    {'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+                     'price_subtotal': 1000.0,
+                     'analytic_distribution': {'24': 60.0}},
+                    {'id': 2, 'move_id': (501, 'CN/001'), 'name': 'b',
+                     'price_subtotal': 200.0,
+                     'analytic_distribution': {'24': 100.0}},
+                ]
+            if model == 'account.move':
+                return [
+                    {'id': 500, 'move_type': 'in_invoice'},
+                    {'id': 501, 'move_type': 'in_refund'},
+                ]
+            return []
+        odoo.search_read.side_effect = fake_search_read
+
+        result = _bill_lines_for_analytic(odoo, 24)
+
+        by_move = {line['move_pk']: line for line in result}
+        assert by_move[500]['attributed_amount'] == 600.0  # 1000 * 0.6
+        assert by_move[500]['is_refund'] is False
+        assert by_move[501]['attributed_amount'] == 200.0
+        assert by_move[501]['is_refund'] is True
+
+    def test_rejects_ilike_false_positive(self, odoo):
+        odoo.search_read.return_value = [{
+            'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+            'price_subtotal': 1000.0,
+            'analytic_distribution': {'124': 100.0},
+        }]
+
+        result = _bill_lines_for_analytic(odoo, 24)
+
+        assert result == []
+
+    def test_domain_filters_to_posted_vendor_moves(self, odoo):
+        odoo.search_read.return_value = []
+
+        _bill_lines_for_analytic(odoo, 24)
+
+        call = odoo.search_read.call_args
+        domain = call[0][1]
+        assert ('move_id.move_type', 'in', ['in_invoice', 'in_refund']) in domain
+        assert ('move_id.state', '=', 'posted') in domain
+
+
+class TestGetPurchaseOrdersAttribution:
+    def test_primary_path_aggregates_lines_to_orders(self, odoo):
+        # 2 lines on the same PO, 1 line on a different PO.
+        def fake_search_read(model, domain, **kw):
+            if model == 'purchase.order.line':
+                return [
+                    {'id': 11, 'order_id': (100, 'PO100'),
+                     'product_qty': 10.0, 'qty_invoiced': 2.0,
+                     'price_unit': 50.0, 'price_subtotal': 500.0,
+                     'analytic_distribution': {'24': 100.0}},
+                    {'id': 12, 'order_id': (100, 'PO100'),
+                     'product_qty': 4.0, 'qty_invoiced': 0.0,
+                     'price_unit': 25.0, 'price_subtotal': 100.0,
+                     'analytic_distribution': {'24': 50.0}},
+                    {'id': 21, 'order_id': (200, 'PO200'),
+                     'product_qty': 1.0, 'qty_invoiced': 0.0,
+                     'price_unit': 10.0, 'price_subtotal': 10.0,
+                     'analytic_distribution': {'24': 100.0}},
+                ]
+            return []
+        odoo.search_read.side_effect = fake_search_read
+        odoo.safe_search_read.return_value = [
+            {'id': 100, 'name': 'PO100', 'partner_id': (9, 'Vendor A'),
+             'date_order': '2025-01-01', 'amount_total': 600.0,
+             'amount_untaxed': 600.0, 'state': 'purchase',
+             'invoice_status': 'to invoice'},
+            {'id': 200, 'name': 'PO200', 'partner_id': (9, 'Vendor A'),
+             'date_order': '2025-01-02', 'amount_total': 10.0,
+             'amount_untaxed': 10.0, 'state': 'done',
+             'invoice_status': 'invoiced'},
+        ]
+
+        result = get_purchase_orders(odoo, 24)
+
+        by_id = {po['id']: po for po in result}
+        # PO100: line 11 attributed 500, line 12 attributed 50 (100 * 0.5); committed = (10-2)*50*1 + 4*25*0.5 = 400 + 50 = 450
+        assert by_id[100]['attributed_amount'] == 550.0
+        assert by_id[100]['committed_amount'] == 450.0
+        assert by_id[100]['matched_line_count'] == 2
+        # PO200: single line, fully invoiced in practice? committed = 1*10*1 = 10
+        assert by_id[200]['attributed_amount'] == 10.0
+        assert by_id[200]['committed_amount'] == 10.0
