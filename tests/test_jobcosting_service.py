@@ -8,8 +8,33 @@ from jobcosting.services import (
     create_time_entry, create_expense_entry,
     get_project_detail, get_job_cost_report,
     _po_lines_for_analytic, _bill_lines_for_analytic,
-    get_purchase_orders, PO_OPEN_STATES,
+    _distribution_pct, get_purchase_orders, PO_OPEN_STATES,
 )
+
+
+def _po_line_search_read(lines, orders=None):
+    """Build a side_effect for odoo.search_read that emulates the two-phase
+    PO lookup: first call returns lines, second call returns parent orders.
+    """
+    orders = orders or []
+    def impl(model, domain, **kw):
+        if model == 'purchase.order.line':
+            return lines
+        if model == 'purchase.order':
+            return orders
+        return []
+    return impl
+
+
+def _bill_line_search_read(lines, moves=None):
+    moves = moves or []
+    def impl(model, domain, **kw):
+        if model == 'account.move.line':
+            return lines
+        if model == 'account.move':
+            return moves
+        return []
+    return impl
 
 
 @pytest.fixture
@@ -242,13 +267,40 @@ class TestJobCostReport:
         assert result['totals']['actual_hours'] == 0
 
 
+class TestDistributionPct:
+    def test_simple_key(self):
+        assert _distribution_pct(24, {'24': 100.0}) == 100.0
+
+    def test_rejects_substring_false_positive(self):
+        assert _distribution_pct(24, {'242': 100.0}) == 0.0
+        assert _distribution_pct(24, {'124': 100.0}) == 0.0
+
+    def test_compound_key_odoo17_analytic_plans(self):
+        # When Analytic Plans are enabled, a line tagged to job 24 AND
+        # department 42 is stored with a single compound key "24,42".
+        # Each analytic in the key still receives the full percentage.
+        assert _distribution_pct(24, {'24,42': 100.0}) == 100.0
+        assert _distribution_pct(42, {'24,42': 100.0}) == 100.0
+
+    def test_compound_key_partial_share(self):
+        assert _distribution_pct(24, {'24,42': 60.0, '25,42': 40.0}) == 60.0
+
+    def test_non_dict_returns_zero(self):
+        assert _distribution_pct(24, None) == 0.0
+        assert _distribution_pct(24, False) == 0.0
+        assert _distribution_pct(24, 'not-a-dict') == 0.0
+
+
 class TestPOLinesForAnalytic:
     def test_single_full_attribution(self, odoo):
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 10.0, 'qty_invoiced': 2.0, 'price_unit': 50.0,
-            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 10.0, 'qty_invoiced': 2.0, 'price_unit': 50.0,
+                'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
@@ -256,81 +308,120 @@ class TestPOLinesForAnalytic:
         line = result[0]
         assert line['distribution_pct'] == 100.0
         assert line['attributed_amount'] == 500.0
-        # (10 - 2) * 50 * 1.0
         assert line['committed_amount'] == 400.0
 
     def test_partial_attribution_respects_pct(self, odoo):
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 100.0,
-            'price_subtotal': 1000.0,
-            'analytic_distribution': {'24': 60.0, '25': 40.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 100.0,
+                'price_subtotal': 1000.0,
+                'analytic_distribution': {'24': 60.0, '25': 40.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
         assert len(result) == 1
         line = result[0]
         assert line['distribution_pct'] == 60.0
-        # 1000 * 0.6
         assert line['attributed_amount'] == 600.0
-        # 10 * 100 * 0.6
         assert line['committed_amount'] == 600.0
 
+    def test_compound_analytic_plan_key(self, odoo):
+        # The bug that was silently dropping every PO: compound key "24,42"
+        # failed the old `str(24) in dist` dict-key check.
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 100.0,
+                'price_subtotal': 1000.0,
+                'analytic_distribution': {'24,42': 100.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
+
+        result = _po_lines_for_analytic(odoo, 24)
+
+        assert len(result) == 1
+        assert result[0]['attributed_amount'] == 1000.0
+        assert result[0]['committed_amount'] == 1000.0
+
     def test_rejects_ilike_false_positive(self, odoo):
-        # account id 24 would substring-match "242" under ilike but the
-        # dict-key check must reject it.
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 1.0, 'qty_invoiced': 0.0, 'price_unit': 10.0,
-            'price_subtotal': 10.0,
-            'analytic_distribution': {'242': 100.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 1.0, 'qty_invoiced': 0.0, 'price_unit': 10.0,
+                'price_subtotal': 10.0,
+                'analytic_distribution': {'242': 100.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
         assert result == []
 
-    def test_domain_filters_by_state_and_key(self, odoo):
-        odoo.search_read.return_value = []
+    def test_filters_to_open_states_post_fetch(self, odoo):
+        # Two lines on two orders: one open (done), one cancelled.
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[
+                {'id': 11, 'order_id': (100, 'PO100'),
+                 'product_qty': 1.0, 'qty_invoiced': 0.0, 'price_unit': 10.0,
+                 'price_subtotal': 10.0, 'analytic_distribution': {'24': 100.0}},
+                {'id': 12, 'order_id': (200, 'PO200'),
+                 'product_qty': 1.0, 'qty_invoiced': 0.0, 'price_unit': 10.0,
+                 'price_subtotal': 10.0, 'analytic_distribution': {'24': 100.0}},
+            ],
+            orders=[
+                {'id': 100, 'state': 'done'},
+                {'id': 200, 'state': 'cancel'},
+            ],
+        )
 
-        _po_lines_for_analytic(odoo, 24)
+        result = _po_lines_for_analytic(odoo, 24)
 
-        call = odoo.search_read.call_args
-        assert call[0][0] == 'purchase.order.line'
-        domain = call[0][1]
-        assert ('order_id.state', 'in', list(PO_OPEN_STATES)) in domain
-        assert ('analytic_distribution', 'ilike', '24') in domain
+        assert len(result) == 1
+        assert result[0]['order_pk'] == 100
 
     def test_fully_invoiced_line_has_zero_committed(self, odoo):
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 5.0, 'qty_invoiced': 5.0, 'price_unit': 100.0,
-            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 5.0, 'qty_invoiced': 5.0, 'price_unit': 100.0,
+                'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
         assert result[0]['committed_amount'] == 0.0
 
     def test_over_invoiced_clamped_to_zero(self, odoo):
-        # qty_invoiced > product_qty should not yield a negative commitment
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 5.0, 'qty_invoiced': 7.0, 'price_unit': 100.0,
-            'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 5.0, 'qty_invoiced': 7.0, 'price_unit': 100.0,
+                'price_subtotal': 500.0, 'analytic_distribution': {'24': 100.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
         assert result[0]['committed_amount'] == 0.0
 
     def test_zero_pct_is_dropped(self, odoo):
-        odoo.search_read.return_value = [{
-            'id': 11, 'order_id': (100, 'PO100'),
-            'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 50.0,
-            'price_subtotal': 500.0, 'analytic_distribution': {'24': 0.0},
-        }]
+        odoo.search_read.side_effect = _po_line_search_read(
+            lines=[{
+                'id': 11, 'order_id': (100, 'PO100'),
+                'product_qty': 10.0, 'qty_invoiced': 0.0, 'price_unit': 50.0,
+                'price_subtotal': 500.0, 'analytic_distribution': {'24': 0.0},
+            }],
+            orders=[{'id': 100, 'state': 'purchase'}],
+        )
 
         result = _po_lines_for_analytic(odoo, 24)
 
@@ -339,57 +430,86 @@ class TestPOLinesForAnalytic:
 
 class TestBillLinesForAnalytic:
     def test_attribution_and_refund_flag(self, odoo):
-        def fake_search_read(model, domain, **kw):
-            if model == 'account.move.line':
-                return [
-                    {'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
-                     'price_subtotal': 1000.0,
-                     'analytic_distribution': {'24': 60.0}},
-                    {'id': 2, 'move_id': (501, 'CN/001'), 'name': 'b',
-                     'price_subtotal': 200.0,
-                     'analytic_distribution': {'24': 100.0}},
-                ]
-            if model == 'account.move':
-                return [
-                    {'id': 500, 'move_type': 'in_invoice'},
-                    {'id': 501, 'move_type': 'in_refund'},
-                ]
-            return []
-        odoo.search_read.side_effect = fake_search_read
+        odoo.search_read.side_effect = _bill_line_search_read(
+            lines=[
+                {'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+                 'price_subtotal': 1000.0,
+                 'analytic_distribution': {'24': 60.0}},
+                {'id': 2, 'move_id': (501, 'CN/001'), 'name': 'b',
+                 'price_subtotal': 200.0,
+                 'analytic_distribution': {'24': 100.0}},
+            ],
+            moves=[
+                {'id': 500, 'move_type': 'in_invoice', 'state': 'posted'},
+                {'id': 501, 'move_type': 'in_refund', 'state': 'posted'},
+            ],
+        )
 
         result = _bill_lines_for_analytic(odoo, 24)
 
         by_move = {line['move_pk']: line for line in result}
-        assert by_move[500]['attributed_amount'] == 600.0  # 1000 * 0.6
+        assert by_move[500]['attributed_amount'] == 600.0
         assert by_move[500]['is_refund'] is False
         assert by_move[501]['attributed_amount'] == 200.0
         assert by_move[501]['is_refund'] is True
 
+    def test_compound_analytic_plan_key(self, odoo):
+        odoo.search_read.side_effect = _bill_line_search_read(
+            lines=[{
+                'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+                'price_subtotal': 1000.0,
+                'analytic_distribution': {'24,42': 100.0},
+            }],
+            moves=[{'id': 500, 'move_type': 'in_invoice', 'state': 'posted'}],
+        )
+
+        result = _bill_lines_for_analytic(odoo, 24)
+
+        assert len(result) == 1
+        assert result[0]['attributed_amount'] == 1000.0
+
     def test_rejects_ilike_false_positive(self, odoo):
-        odoo.search_read.return_value = [{
-            'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
-            'price_subtotal': 1000.0,
-            'analytic_distribution': {'124': 100.0},
-        }]
+        odoo.search_read.side_effect = _bill_line_search_read(
+            lines=[{
+                'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+                'price_subtotal': 1000.0,
+                'analytic_distribution': {'124': 100.0},
+            }],
+            moves=[{'id': 500, 'move_type': 'in_invoice', 'state': 'posted'}],
+        )
 
         result = _bill_lines_for_analytic(odoo, 24)
 
         assert result == []
 
-    def test_domain_filters_to_posted_vendor_moves(self, odoo):
-        odoo.search_read.return_value = []
+    def test_filters_to_posted_vendor_moves_post_fetch(self, odoo):
+        odoo.search_read.side_effect = _bill_line_search_read(
+            lines=[
+                {'id': 1, 'move_id': (500, 'BILL/001'), 'name': 'a',
+                 'price_subtotal': 100.0,
+                 'analytic_distribution': {'24': 100.0}},
+                {'id': 2, 'move_id': (600, 'INV/001'), 'name': 'b',
+                 'price_subtotal': 200.0,
+                 'analytic_distribution': {'24': 100.0}},
+                {'id': 3, 'move_id': (700, 'DRAFT'), 'name': 'c',
+                 'price_subtotal': 300.0,
+                 'analytic_distribution': {'24': 100.0}},
+            ],
+            moves=[
+                {'id': 500, 'move_type': 'in_invoice', 'state': 'posted'},
+                {'id': 600, 'move_type': 'out_invoice', 'state': 'posted'},
+                {'id': 700, 'move_type': 'in_invoice', 'state': 'draft'},
+            ],
+        )
 
-        _bill_lines_for_analytic(odoo, 24)
+        result = _bill_lines_for_analytic(odoo, 24)
 
-        call = odoo.search_read.call_args
-        domain = call[0][1]
-        assert ('move_id.move_type', 'in', ['in_invoice', 'in_refund']) in domain
-        assert ('move_id.state', '=', 'posted') in domain
+        move_pks = {line['move_pk'] for line in result}
+        assert move_pks == {500}
 
 
 class TestGetPurchaseOrdersAttribution:
     def test_primary_path_aggregates_lines_to_orders(self, odoo):
-        # 2 lines on the same PO, 1 line on a different PO.
         def fake_search_read(model, domain, **kw):
             if model == 'purchase.order.line':
                 return [
@@ -405,6 +525,11 @@ class TestGetPurchaseOrdersAttribution:
                      'product_qty': 1.0, 'qty_invoiced': 0.0,
                      'price_unit': 10.0, 'price_subtotal': 10.0,
                      'analytic_distribution': {'24': 100.0}},
+                ]
+            if model == 'purchase.order':
+                return [
+                    {'id': 100, 'state': 'purchase'},
+                    {'id': 200, 'state': 'done'},
                 ]
             return []
         odoo.search_read.side_effect = fake_search_read

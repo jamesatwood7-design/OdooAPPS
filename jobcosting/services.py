@@ -11,6 +11,30 @@ logger = logging.getLogger(__name__)
 PO_OPEN_STATES = ('purchase', 'done')
 
 
+def _distribution_pct(account_id, dist):
+    """Return the percentage this analytic account gets from a distribution dict.
+
+    Handles Odoo 17 compound keys used when Analytic Plans are enabled —
+    e.g. ``{"24,42": 100.0}`` means this line is tagged to account 24 AND
+    account 42 simultaneously, each receiving 100% of the line's value.
+    Each comma-separated part is matched independently so a prefix like
+    "24" does not false-match "242" or "24,42"-as-a-whole.
+    """
+    if not isinstance(dist, dict):
+        return 0.0
+    key = str(account_id)
+    total = 0.0
+    for compound_key, pct in dist.items():
+        parts = [part.strip() for part in str(compound_key).split(',')]
+        if key not in parts:
+            continue
+        try:
+            total += float(pct)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def get_analytic_accounts(odoo, domain=None):
     """List analytic accounts with balances."""
     if domain is None:
@@ -537,102 +561,138 @@ def get_sales_orders(odoo, account_id, invoices=None):
 def _po_lines_for_analytic(odoo, account_id):
     """Open PO lines tagged to this analytic account, with attribution.
 
-    Restricts to PO state in PO_OPEN_STATES. Each returned dict adds:
-      - distribution_pct  (the analytic's share, 0-100)
+    Two-phase lookup to stay resilient against API-user permission gaps:
+      1. Scan `purchase.order.line` matched by `analytic_distribution ilike`.
+      2. Batch-fetch parent PO states and drop lines whose order isn't in
+         PO_OPEN_STATES (('purchase','done')).
+
+    Each returned dict adds:
+      - distribution_pct  (0-100)
       - attributed_amount (price_subtotal * pct/100)
       - committed_amount  ((product_qty - qty_invoiced) * price_unit * pct/100)
 
-    `qty_invoiced` is used (financial exposure — what we still owe the vendor),
-    not `qty_received`. See docs/decisions/odoo-cost-data-layers.md.
+    `qty_invoiced` is financial exposure (what we still owe the vendor).
+    See docs/decisions/odoo-cost-data-layers.md.
     """
     key = str(account_id)
-    domain = [
-        ('order_id.state', 'in', list(PO_OPEN_STATES)),
-        ('analytic_distribution', 'ilike', key),
-    ]
     raw_lines = odoo.search_read(
-        'purchase.order.line', domain,
+        'purchase.order.line',
+        [('analytic_distribution', 'ilike', key)],
         fields=['id', 'order_id', 'product_id', 'name',
                 'product_qty', 'qty_invoiced', 'price_unit',
                 'price_subtotal', 'analytic_distribution'],
         limit=2000,
     )
+
     matched = []
+    order_ids = set()
     for line in raw_lines:
         dist = line.get('analytic_distribution')
-        if not (isinstance(dist, dict) and key in dist):
+        pct_value = _distribution_pct(account_id, dist)
+        if pct_value <= 0:
             continue
-        try:
-            pct_share = float(dist[key]) / 100.0
-        except (TypeError, ValueError):
+        order_raw = line.get('order_id')
+        order_pk = order_raw[0] if isinstance(order_raw, (list, tuple)) else order_raw
+        if not order_pk:
             continue
-        if pct_share <= 0:
-            continue
+        pct_share = pct_value / 100.0
         qty_open = max(
             0.0,
             (line.get('product_qty') or 0.0) - (line.get('qty_invoiced') or 0.0),
         )
-        line['distribution_pct'] = pct_share * 100.0
+        line['order_pk'] = order_pk
+        line['distribution_pct'] = pct_value
         line['attributed_amount'] = (line.get('price_subtotal') or 0.0) * pct_share
         line['committed_amount'] = qty_open * (line.get('price_unit') or 0.0) * pct_share
+        order_ids.add(order_pk)
         matched.append(line)
-    return matched
+
+    if not matched:
+        if raw_lines:
+            logger.warning(
+                'PO line search for account_id=%s returned %d rows but none '
+                'matched after distribution verification; sample keys=%s',
+                account_id, len(raw_lines),
+                [list((rl.get('analytic_distribution') or {}).keys())
+                 for rl in raw_lines[:3]],
+            )
+        return []
+
+    state_rows = odoo.search_read(
+        'purchase.order',
+        [('id', 'in', list(order_ids))],
+        fields=['id', 'state'],
+    )
+    open_ids = {r['id'] for r in state_rows if r.get('state') in PO_OPEN_STATES}
+    return [line for line in matched if line['order_pk'] in open_ids]
 
 
 def _bill_lines_for_analytic(odoo, account_id):
     """Posted vendor-bill (and refund) lines tagged to this analytic, with attribution.
 
+    Two-phase lookup: line scan by analytic_distribution first, then batch
+    fetch of parent `account.move` records to filter to posted vendor moves
+    and mark refund lines.
+
     Each returned dict adds:
-      - distribution_pct
+      - distribution_pct  (0-100)
       - attributed_amount (price_subtotal * pct/100)
-      - is_refund (True for in_refund moves)
-      - move_pk (the parent move id, normalized to int)
+      - is_refund         (True for in_refund moves)
+      - move_pk           (the parent move id)
     """
     key = str(account_id)
-    domain = [
-        ('move_id.move_type', 'in', ['in_invoice', 'in_refund']),
-        ('move_id.state', '=', 'posted'),
-        ('analytic_distribution', 'ilike', key),
-    ]
     raw_lines = odoo.search_read(
-        'account.move.line', domain,
+        'account.move.line',
+        [('analytic_distribution', 'ilike', key)],
         fields=['id', 'move_id', 'name', 'price_subtotal', 'analytic_distribution'],
         limit=2000,
     )
 
-    matched = []
+    candidates = []
     move_ids = set()
     for line in raw_lines:
         dist = line.get('analytic_distribution')
-        if not (isinstance(dist, dict) and key in dist):
-            continue
-        try:
-            pct_share = float(dist[key]) / 100.0
-        except (TypeError, ValueError):
-            continue
-        if pct_share <= 0:
+        pct_value = _distribution_pct(account_id, dist)
+        if pct_value <= 0:
             continue
         mv = line.get('move_id')
         move_pk = mv[0] if isinstance(mv, (list, tuple)) else mv
-        if move_pk:
-            move_ids.add(move_pk)
+        if not move_pk:
+            continue
+        pct_share = pct_value / 100.0
         line['move_pk'] = move_pk
-        line['distribution_pct'] = pct_share * 100.0
+        line['distribution_pct'] = pct_value
         line['attributed_amount'] = (line.get('price_subtotal') or 0.0) * pct_share
+        move_ids.add(move_pk)
+        candidates.append(line)
+
+    if not candidates:
+        if raw_lines:
+            logger.warning(
+                'Move line search for account_id=%s returned %d rows but none '
+                'matched after distribution verification; sample keys=%s',
+                account_id, len(raw_lines),
+                [list((rl.get('analytic_distribution') or {}).keys())
+                 for rl in raw_lines[:3]],
+            )
+        return []
+
+    moves = odoo.search_read(
+        'account.move',
+        [('id', 'in', list(move_ids))],
+        fields=['id', 'move_type', 'state'],
+    )
+    info_by_move = {m['id']: m for m in moves}
+
+    matched = []
+    for line in candidates:
+        info = info_by_move.get(line.get('move_pk')) or {}
+        if info.get('state') != 'posted':
+            continue
+        if info.get('move_type') not in ('in_invoice', 'in_refund'):
+            continue
+        line['is_refund'] = info.get('move_type') == 'in_refund'
         matched.append(line)
-
-    type_by_move = {}
-    if move_ids:
-        moves = odoo.search_read(
-            'account.move',
-            [('id', 'in', list(move_ids))],
-            fields=['id', 'move_type'],
-        )
-        type_by_move = {m['id']: m.get('move_type') for m in moves}
-
-    for line in matched:
-        line['is_refund'] = type_by_move.get(line.get('move_pk')) == 'in_refund'
-
     return matched
 
 
@@ -955,17 +1015,25 @@ def _fetch_bills_for_analytic(odoo, account_id):
         try:
             rows = odoo.search_read(
                 'account.move.line',
-                [('analytic_account_id', '=', account_id),
-                 ('move_id.move_type', 'in', ['in_invoice', 'in_refund']),
-                 ('move_id.state', '=', 'posted')],
+                [('analytic_account_id', '=', account_id)],
                 fields=['move_id'],
                 limit=2000,
             )
+            candidate_moves = set()
             for r in rows:
                 mv = r.get('move_id')
                 mv = mv[0] if isinstance(mv, (list, tuple)) else mv
                 if mv:
-                    move_ids.add(mv)
+                    candidate_moves.add(mv)
+            if candidate_moves:
+                filtered = odoo.search_read(
+                    'account.move',
+                    [('id', 'in', list(candidate_moves)),
+                     ('move_type', 'in', ['in_invoice', 'in_refund']),
+                     ('state', '=', 'posted')],
+                    fields=['id'],
+                )
+                move_ids.update(m['id'] for m in filtered)
         except Exception as exc:
             logger.warning(
                 'Bill fallback via legacy analytic_account_id failed for account_id=%s: %s',
@@ -986,33 +1054,31 @@ def _fetch_invoices_for_analytic(odoo, account_id):
     key = str(account_id)
     move_ids = set()
 
+    candidate_moves = set()
     try:
         move_lines = odoo.search_read(
             'account.move.line',
-            [('move_id.move_type', 'in', ['out_invoice', 'out_refund']),
-             ('analytic_distribution', 'ilike', key)],
+            [('analytic_distribution', 'ilike', key)],
             fields=['move_id', 'analytic_distribution'],
             limit=2000,
         )
         for ml in move_lines:
-            dist = ml.get('analytic_distribution')
-            if isinstance(dist, dict) and key in dist:
+            if _distribution_pct(account_id, ml.get('analytic_distribution')) > 0:
                 mv = ml.get('move_id')
                 mv = mv[0] if isinstance(mv, (list, tuple)) else mv
                 if mv:
-                    move_ids.add(mv)
+                    candidate_moves.add(mv)
     except Exception as exc:
         logger.warning(
             'Invoice lookup via analytic_distribution failed for account_id=%s: %s',
             account_id, exc,
         )
 
-    if not move_ids:
+    if not candidate_moves:
         try:
             rows = odoo.search_read(
                 'account.move.line',
-                [('analytic_account_id', '=', account_id),
-                 ('move_id.move_type', 'in', ['out_invoice', 'out_refund'])],
+                [('analytic_account_id', '=', account_id)],
                 fields=['move_id'],
                 limit=2000,
             )
@@ -1020,12 +1086,21 @@ def _fetch_invoices_for_analytic(odoo, account_id):
                 mv = r.get('move_id')
                 mv = mv[0] if isinstance(mv, (list, tuple)) else mv
                 if mv:
-                    move_ids.add(mv)
+                    candidate_moves.add(mv)
         except Exception as exc:
             logger.warning(
                 'Invoice fallback via legacy analytic_account_id failed for account_id=%s: %s',
                 account_id, exc,
             )
+
+    if candidate_moves:
+        filtered = odoo.search_read(
+            'account.move',
+            [('id', 'in', list(candidate_moves)),
+             ('move_type', 'in', ['out_invoice', 'out_refund'])],
+            fields=['id'],
+        )
+        move_ids.update(m['id'] for m in filtered)
 
     if not move_ids:
         try:
