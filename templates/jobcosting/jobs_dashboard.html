@@ -3,12 +3,12 @@
 {% block title %}Jobs - Dashboard{% endblock %}
 
 {% block content %}
-<div class="jobs-toolbar d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-    <div class="input-group input-group-sm jobs-search">
-        <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
-        <input type="text" id="jobSearch" class="form-control" placeholder="Search jobs by name, customer, salesman…">
-    </div>
-    <div class="d-flex align-items-center gap-2">
+<div class="list-toolbar">
+    <label class="list-search">
+        <i class="bi bi-search"></i>
+        <input type="text" id="jobSearch" placeholder="Search jobs by name, customer, salesman…">
+    </label>
+    <div class="toolbar-group">
         <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
             <button type="button" class="btn btn-outline-secondary active" id="listViewBtn" onclick="setView('list')"
                     title="List view">
@@ -42,17 +42,17 @@
 </div>
 
 {% if status_options %}
-<div class="status-chips mb-3">
-    <button class="status-chip {% if not default_status %}active{% endif %}" data-status="all">
+<div class="filter-chips mb-3">
+    <button class="filter-chip {% if not default_status %}active{% endif %}" data-status="all">
         All <span class="count">{{ jobs|length }}</span>
     </button>
     {% for status in status_options %}
-        <button class="status-chip {% if status == default_status %}active{% endif %}"
+        <button class="filter-chip {% if status == default_status %}active{% endif %}"
                 data-status="{{ status }}">
             {{ status }} <span class="count">{{ status_counts.get(status, 0) }}</span>
         </button>
     {% endfor %}
-    <span class="ms-auto text-muted small">
+    <span class="ms-auto list-meta">
         Showing <strong id="jobCount">{{ jobs|length }}</strong> of {{ jobs|length }}
     </span>
 </div>
@@ -172,10 +172,10 @@ var hasStatusFilter = {{ 'true' if status_options else 'false' }};
 var currentStatus = hasStatusFilter ? defaultStatus : 'all';
 var currentView = localStorage.getItem('jobsView') || 'list';
 
-document.querySelectorAll('.status-chip').forEach(function(btn) {
+document.querySelectorAll('.filter-chip').forEach(function(btn) {
     btn.addEventListener('click', function() {
         currentStatus = this.dataset.status;
-        document.querySelectorAll('.status-chip').forEach(function(b) {
+        document.querySelectorAll('.filter-chip').forEach(function(b) {
             b.classList.remove('active');
         });
         this.classList.add('active');
@@ -215,7 +215,7 @@ function applyFilters() {
     // If the default filter shows 0 results, fall back to 'all' so the page isn't blank on first load.
     if (count === 0 && currentStatus !== 'all' && !query) {
         currentStatus = 'all';
-        document.querySelectorAll('.status-chip').forEach(function(b) {
+        document.querySelectorAll('.filter-chip').forEach(function(b) {
             b.classList.toggle('active', b.dataset.status === 'all');
         });
         applyFilters();

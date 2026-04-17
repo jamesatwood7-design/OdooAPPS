@@ -1,118 +1,109 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 
 {% block title %}Analytic Entries - Job Costing{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-list-ul"></i> Analytic Entries</h2>
-    <div>
-        <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-primary me-2">
-            <i class="bi bi-plus-circle"></i> New Entry
-        </a>
-        <a href="{{ url_for('jobcosting.dashboard') }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Back
-        </a>
-    </div>
-</div>
-
-<!-- Filters -->
-<div class="card mb-4">
-    <div class="card-body">
-        <form method="GET" class="row g-3 align-items-end">
-            <div class="col-md-3">
-                <label for="project_id" class="form-label">Project</label>
-                <select name="project_id" id="project_id" class="form-select">
-                    <option value="">All Projects</option>
-                    {% for proj in projects %}
-                        <option value="{{ proj.id }}"
-                            {% if proj.id == selected_project_id %}selected{% endif %}>
-                            {{ proj.name }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label for="account_id" class="form-label">Account</label>
-                <select name="account_id" id="account_id" class="form-select">
-                    <option value="">All Accounts</option>
-                    {% for acct in accounts %}
-                        <option value="{{ acct.id }}"
-                            {% if acct.id == selected_account_id %}selected{% endif %}>
-                            {{ acct.name }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label for="date_from" class="form-label">From</label>
-                <input type="date" name="date_from" id="date_from" class="form-control"
-                       value="{{ date_from.isoformat() if date_from else '' }}">
-            </div>
-            <div class="col-md-2">
-                <label for="date_to" class="form-label">To</label>
-                <input type="date" name="date_to" id="date_to" class="form-control"
-                       value="{{ date_to.isoformat() if date_to else '' }}">
-            </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-funnel"></i> Filter
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Entries Table -->
-{% if lines %}
-<div class="table-responsive">
-    <table class="table table-striped table-hover">
-        <thead class="table-dark">
-            <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Project</th>
-                <th>Task</th>
-                <th>Employee</th>
-                <th class="text-end">Hours</th>
-                <th class="text-end">Amount</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for line in lines %}
-            <tr>
-                <td>{{ line.date }}</td>
-                <td>{{ line.name }}</td>
-                <td>
-                    {% if line.project_id %}
-                        {{ line.project_id[1] if line.project_id is iterable and line.project_id is not string else line.project_id }}
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-                <td>
-                    {% if line.task_id %}
-                        {{ line.task_id[1] if line.task_id is iterable and line.task_id is not string else line.task_id }}
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-                <td>
-                    {% if line.employee_id %}
-                        {{ line.employee_id[1] if line.employee_id is iterable and line.employee_id is not string else line.employee_id }}
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-                <td class="text-end">{{ line.unit_amount_fmt }}</td>
-                <td class="text-end">${{ '%.2f'|format(line.amount|abs) }}</td>
-            </tr>
+<form method="GET" class="list-filters">
+    <div class="filter-item">
+        <span class="filter-label">Project</span>
+        <select name="project_id" class="form-select">
+            <option value="">All Projects</option>
+            {% for proj in projects %}
+                <option value="{{ proj.id }}"
+                    {% if proj.id == selected_project_id %}selected{% endif %}>
+                    {{ proj.name }}
+                </option>
             {% endfor %}
-        </tbody>
-    </table>
+        </select>
+    </div>
+    <div class="filter-item">
+        <span class="filter-label">Account</span>
+        <select name="account_id" class="form-select">
+            <option value="">All Accounts</option>
+            {% for acct in accounts %}
+                <option value="{{ acct.id }}"
+                    {% if acct.id == selected_account_id %}selected{% endif %}>
+                    {{ acct.name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-item">
+        <span class="filter-label">From</span>
+        <input type="date" name="date_from" class="form-control"
+               value="{{ date_from.isoformat() if date_from else '' }}">
+    </div>
+    <div class="filter-item">
+        <span class="filter-label">To</span>
+        <input type="date" name="date_to" class="form-control"
+               value="{{ date_to.isoformat() if date_to else '' }}">
+    </div>
+    <div class="filter-actions">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
+        <a href="?" class="btn btn-sm btn-outline-secondary">Reset</a>
+    </div>
+</form>
+
+<div class="list-toolbar">
+    <label class="list-search">
+        <i class="bi bi-search"></i>
+        <input type="text" placeholder="Search entries…"
+               data-list-filter="#entryTable" data-list-counter="#entryCount">
+    </label>
+    <div class="toolbar-group">
+        <span class="list-meta"><strong id="entryCount">{{ lines|length }}</strong> of {{ lines|length }}</span>
+        <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Entry
+        </a>
+    </div>
+</div>
+
+{% if lines %}
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0" id="entryTable">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Project</th>
+                    <th>Task</th>
+                    <th>Employee</th>
+                    <th class="text-end">Hours</th>
+                    <th class="text-end">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in lines %}
+                <tr>
+                    <td>{{ line.date }}</td>
+                    <td>{{ line.name }}</td>
+                    <td>
+                        {% if line.project_id %}
+                            {{ line.project_id[1] if line.project_id is iterable and line.project_id is not string else line.project_id }}
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if line.task_id %}
+                            {{ line.task_id[1] if line.task_id is iterable and line.task_id is not string else line.task_id }}
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if line.employee_id %}
+                            {{ line.employee_id[1] if line.employee_id is iterable and line.employee_id is not string else line.employee_id }}
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td class="text-end">{{ line.unit_amount_fmt }}</td>
+                    <td class="text-end">${{ '%.2f'|format(line.amount|abs) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% else %}
-<div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> No entries found matching the current filters.
-</div>
+{{ empty_state('inbox', 'No entries match these filters',
+    'Try widening the date range or clearing project and account filters.') }}
 {% endif %}
 {% endblock %}

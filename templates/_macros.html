@@ -1,0 +1,7 @@
+{% macro empty_state(icon, title, body='') -%}
+<div class="empty-state">
+    <i class="bi bi-{{ icon }}"></i>
+    <h5>{{ title }}</h5>
+    {% if body %}<p>{{ body }}</p>{% endif %}
+</div>
+{%- endmacro %}

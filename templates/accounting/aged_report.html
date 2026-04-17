@@ -1,83 +1,84 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-calendar3-range"></i> {{ title }}</h2>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md-3">
-                <label class="form-label">As of Date</label>
-                <input type="date" name="as_of" class="form-control" value="{{ as_of }}">
-            </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
-            </div>
-            <div class="col-md-7 text-end">
-                {% if data.totals %}
-                <strong>Total Outstanding: ${{ '{:,.2f}'.format(data.totals.get('total', 0)) }}</strong>
-                {% endif %}
-            </div>
-        </form>
+<form method="GET" class="list-filters">
+    <div class="filter-item">
+        <span class="filter-label">As of Date</span>
+        <input type="date" name="as_of" class="form-control" value="{{ as_of }}">
     </div>
-</div>
+    <div class="filter-actions">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
+    </div>
+    {% if data.totals %}
+    <div class="filter-item ms-auto text-end">
+        <span class="filter-label">Total Outstanding</span>
+        <strong class="fs-5">${{ '{:,.2f}'.format(data.totals.get('total', 0)) }}</strong>
+    </div>
+    {% endif %}
+</form>
 
 {% if data.rows %}
-<div class="card">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0" style="font-size: 0.9rem;">
-                <thead class="table-dark">
-                    <tr>
-                        <th>{% if report_type == 'receivable' %}Customer{% else %}Vendor{% endif %}</th>
-                        <th class="text-end">Current</th>
-                        <th class="text-end">1-30 Days</th>
-                        <th class="text-end">31-60 Days</th>
-                        <th class="text-end">61-90 Days</th>
-                        <th class="text-end">90+ Days</th>
-                        <th class="text-end">Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in data.rows %}
-                    <tr>
-                        <td class="fw-semibold">{{ row.name }}</td>
-                        <td class="text-end">{{ '${:,.2f}'.format(row.current) if row.current else '' }}</td>
-                        <td class="text-end">{{ '${:,.2f}'.format(row.b1_30) if row.b1_30 else '' }}</td>
-                        <td class="text-end {% if row.b31_60 %}text-warning{% endif %}">
-                            {{ '${:,.2f}'.format(row.b31_60) if row.b31_60 else '' }}
-                        </td>
-                        <td class="text-end {% if row.b61_90 %}text-danger{% endif %}">
-                            {{ '${:,.2f}'.format(row.b61_90) if row.b61_90 else '' }}
-                        </td>
-                        <td class="text-end {% if row.b90_plus %}fw-bold text-danger{% endif %}">
-                            {{ '${:,.2f}'.format(row.b90_plus) if row.b90_plus else '' }}
-                        </td>
-                        <td class="text-end fw-bold">${{ '{:,.2f}'.format(row.total) }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-                <tfoot style="border-top: 3px double #000;">
-                    <tr class="fw-bold">
-                        <td>TOTALS</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.current) }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.b1_30) }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.b31_60) }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.b61_90) }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.b90_plus) }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(data.totals.total) }}</td>
-                    </tr>
-                </tfoot>
-            </table>
-        </div>
+<div class="list-toolbar">
+    <label class="list-search">
+        <i class="bi bi-search"></i>
+        <input type="text" placeholder="Search by {{ 'customer' if report_type == 'receivable' else 'vendor' }}…"
+               data-list-filter="#agedTable" data-list-counter="#agedCount">
+    </label>
+    <span class="list-meta"><strong id="agedCount">{{ data.rows|length }}</strong> of {{ data.rows|length }}</span>
+</div>
+
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0" id="agedTable">
+            <thead>
+                <tr>
+                    <th>{% if report_type == 'receivable' %}Customer{% else %}Vendor{% endif %}</th>
+                    <th class="text-end">Current</th>
+                    <th class="text-end">1–30 Days</th>
+                    <th class="text-end">31–60 Days</th>
+                    <th class="text-end">61–90 Days</th>
+                    <th class="text-end">90+ Days</th>
+                    <th class="text-end">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in data.rows %}
+                <tr>
+                    <td class="fw-semibold">{{ row.name }}</td>
+                    <td class="text-end">{{ '${:,.2f}'.format(row.current) if row.current else '' }}</td>
+                    <td class="text-end">{{ '${:,.2f}'.format(row.b1_30) if row.b1_30 else '' }}</td>
+                    <td class="text-end {% if row.b31_60 %}text-warning{% endif %}">
+                        {{ '${:,.2f}'.format(row.b31_60) if row.b31_60 else '' }}
+                    </td>
+                    <td class="text-end {% if row.b61_90 %}text-danger{% endif %}">
+                        {{ '${:,.2f}'.format(row.b61_90) if row.b61_90 else '' }}
+                    </td>
+                    <td class="text-end {% if row.b90_plus %}fw-bold text-danger{% endif %}">
+                        {{ '${:,.2f}'.format(row.b90_plus) if row.b90_plus else '' }}
+                    </td>
+                    <td class="text-end fw-bold">${{ '{:,.2f}'.format(row.total) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>TOTALS</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.current) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.b1_30) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.b31_60) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.b61_90) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.b90_plus) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(data.totals.total) }}</td>
+                </tr>
+            </tfoot>
+        </table>
     </div>
 </div>
 {% else %}
-<div class="alert alert-success">
-    <i class="bi bi-check-circle"></i> No outstanding {{ 'receivables' if report_type == 'receivable' else 'payables' }}.
-</div>
+{{ empty_state('check-circle',
+    'No outstanding ' + ('receivables' if report_type == 'receivable' else 'payables'),
+    'All accounts are current as of the selected date.') }}
 {% endif %}
 {% endblock %}

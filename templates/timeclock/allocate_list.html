@@ -1,44 +1,43 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 
 {% block title %}Allocate Team Time - Time Clock{% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-md-10 mx-auto">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2><i class="bi bi-clock-history"></i> Allocate Team Time</h2>
-            <a href="{{ url_for('timeclock.dashboard') }}" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i> Back to Dashboard
+        <div class="list-toolbar">
+            <div>
+                {% if manager %}
+                <span class="list-meta">
+                    Manager: <strong>{{ manager.name }}</strong>
+                    <span class="badge bg-info ms-2">{{ subordinates_data|length }} team member{{ 's' if subordinates_data|length != 1 else '' }}</span>
+                </span>
+                {% endif %}
+            </div>
+            <a href="{{ url_for('timeclock.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
             </a>
         </div>
-
-        {% if manager %}
-        <p class="text-muted">
-            Manager: <strong>{{ manager.name }}</strong>
-            <span class="badge bg-info ms-2">{{ subordinates_data|length }} team member(s)</span>
-        </p>
-        {% endif %}
 
         {% if subordinates_data %}
             {% set total_unallocated = subordinates_data | map(attribute='unallocated_count') | sum %}
             {% if total_unallocated > 0 %}
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle"></i>
-                Your team has <strong>{{ total_unallocated }}</strong> shift(s) with unallocated hours.
+                Your team has <strong>{{ total_unallocated }}</strong> shift{{ 's' if total_unallocated != 1 else '' }} with unallocated hours.
             </div>
             {% else %}
             <div class="alert alert-success">
-                <i class="bi bi-check-circle"></i> All team shifts have been allocated!
+                <i class="bi bi-check-circle"></i> All team shifts have been allocated.
             </div>
             {% endif %}
 
             {% for sub_data in subordinates_data %}
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center
-                    {% if sub_data.unallocated_count > 0 %}bg-warning bg-opacity-25{% else %}bg-success bg-opacity-10{% endif %}">
-                    <h5 class="mb-0">
-                        <i class="bi bi-person"></i> {{ sub_data.employee.name }}
-                    </h5>
+            <div class="list-card mb-3">
+                <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom
+                    {% if sub_data.unallocated_count > 0 %}bg-warning bg-opacity-10{% else %}bg-success bg-opacity-10{% endif %}">
+                    <div class="fw-semibold"><i class="bi bi-person"></i> {{ sub_data.employee.name }}</div>
                     {% if sub_data.unallocated_count > 0 %}
                     <span class="badge bg-warning text-dark">{{ sub_data.unallocated_count }} unallocated</span>
                     {% else %}
@@ -47,51 +46,46 @@
                 </div>
 
                 {% if sub_data.unallocated %}
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-sm table-hover mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Clock In</th>
-                                    <th>Clock Out</th>
-                                    <th>Total Hours</th>
-                                    <th>Allocated</th>
-                                    <th>Remaining</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for att in sub_data.unallocated %}
-                                <tr>
-                                    <td>{{ att.check_in_dt.strftime('%Y-%m-%d') if att.check_in_dt else '-' }}</td>
-                                    <td>{{ att.check_in_dt.strftime('%I:%M %p') if att.check_in_dt else '-' }}</td>
-                                    <td>{{ att.check_out_dt.strftime('%I:%M %p') if att.check_out_dt else '-' }}</td>
-                                    <td><strong>{{ att.worked_hours_fmt }}</strong></td>
-                                    <td>{{ att.allocated_hours_fmt }}</td>
-                                    <td>
-                                        <span class="text-danger fw-bold">{{ att.remaining_hours_fmt }}</span>
-                                    </td>
-                                    <td>
-                                        <a href="{{ url_for('timeclock.allocate', attendance_id=att.id) }}"
-                                           class="btn btn-sm btn-warning">
-                                            <i class="bi bi-pencil-square"></i> Allocate
-                                        </a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Clock In</th>
+                                <th>Clock Out</th>
+                                <th class="text-end">Total</th>
+                                <th class="text-end">Allocated</th>
+                                <th class="text-end">Remaining</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for att in sub_data.unallocated %}
+                            <tr>
+                                <td>{{ att.check_in_dt.strftime('%Y-%m-%d') if att.check_in_dt else '-' }}</td>
+                                <td>{{ att.check_in_dt.strftime('%I:%M %p') if att.check_in_dt else '-' }}</td>
+                                <td>{{ att.check_out_dt.strftime('%I:%M %p') if att.check_out_dt else '-' }}</td>
+                                <td class="text-end fw-semibold">{{ att.worked_hours_fmt }}</td>
+                                <td class="text-end">{{ att.allocated_hours_fmt }}</td>
+                                <td class="text-end text-danger fw-bold">{{ att.remaining_hours_fmt }}</td>
+                                <td class="text-end">
+                                    <a href="{{ url_for('timeclock.allocate', attendance_id=att.id) }}"
+                                       class="btn btn-sm btn-warning">
+                                        <i class="bi bi-pencil-square"></i> Allocate
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
                 {% endif %}
             </div>
             {% endfor %}
 
         {% else %}
-        <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> No team members found. Make sure employees have you set as their manager in Odoo (HR > Employees > Manager field).
-        </div>
+        {{ empty_state('people', 'No team members found',
+            'Ensure employees have you set as their manager in Odoo (HR → Employees → Manager).') }}
         {% endif %}
     </div>
 </div>
