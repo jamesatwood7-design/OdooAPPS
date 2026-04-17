@@ -537,24 +537,6 @@ def get_sales_orders(odoo, account_id, invoices=None):
     if not order_ids and invoices:
         order_ids = _find_orders_via_invoices(odoo, invoices, 'sale.order')
 
-    # Strategy 3: analytic_account_id on SO lines
-    if not order_ids:
-        try:
-            lines = odoo.search_read(
-                'sale.order.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['order_id'],
-                limit=500,
-            )
-            for line in lines:
-                oid = line.get('order_id')
-                if isinstance(oid, (list, tuple)):
-                    order_ids.add(oid[0])
-                elif oid:
-                    order_ids.add(oid)
-        except Exception:
-            pass
-
     return _fetch_orders_by_ids(odoo, 'sale.order', order_ids)
 
 
@@ -616,6 +598,13 @@ def _po_lines_for_analytic(odoo, account_id):
                 [list((rl.get('analytic_distribution') or {}).keys())
                  for rl in raw_lines[:3]],
             )
+        else:
+            logger.info(
+                'PO line search for account_id=%s returned 0 rows. The account '
+                'may not appear in any purchase.order.line.analytic_distribution. '
+                'Hit /jobcosting/debug/analytic/%s to inspect.',
+                account_id, account_id,
+            )
         return []
 
     state_rows = odoo.search_read(
@@ -674,6 +663,11 @@ def _bill_lines_for_analytic(odoo, account_id):
                 account_id, len(raw_lines),
                 [list((rl.get('analytic_distribution') or {}).keys())
                  for rl in raw_lines[:3]],
+            )
+        else:
+            logger.info(
+                'Move line search for account_id=%s returned 0 rows.',
+                account_id,
             )
         return []
 
@@ -738,26 +732,6 @@ def get_purchase_orders(odoo, account_id, bills=None):
     order_ids = set()
     if bills:
         order_ids = _find_orders_via_invoices(odoo, bills, 'purchase.order')
-
-    if not order_ids:
-        try:
-            lines = odoo.search_read(
-                'purchase.order.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['order_id'],
-                limit=500,
-            )
-            for line in lines:
-                oid = line.get('order_id')
-                if isinstance(oid, (list, tuple)):
-                    order_ids.add(oid[0])
-                elif oid:
-                    order_ids.add(oid)
-        except Exception as exc:
-            logger.warning(
-                'PO fallback via legacy analytic_account_id failed for account_id=%s: %s',
-                account_id, exc,
-            )
 
     return _fetch_orders_by_ids(odoo, 'purchase.order', order_ids)
 
@@ -1012,35 +986,6 @@ def _fetch_bills_for_analytic(odoo, account_id):
         attr_by_move[mv] = attr_by_move.get(mv, 0.0) + line.get('attributed_amount', 0.0)
 
     if not move_ids:
-        try:
-            rows = odoo.search_read(
-                'account.move.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['move_id'],
-                limit=2000,
-            )
-            candidate_moves = set()
-            for r in rows:
-                mv = r.get('move_id')
-                mv = mv[0] if isinstance(mv, (list, tuple)) else mv
-                if mv:
-                    candidate_moves.add(mv)
-            if candidate_moves:
-                filtered = odoo.search_read(
-                    'account.move',
-                    [('id', 'in', list(candidate_moves)),
-                     ('move_type', 'in', ['in_invoice', 'in_refund']),
-                     ('state', '=', 'posted')],
-                    fields=['id'],
-                )
-                move_ids.update(m['id'] for m in filtered)
-        except Exception as exc:
-            logger.warning(
-                'Bill fallback via legacy analytic_account_id failed for account_id=%s: %s',
-                account_id, exc,
-            )
-
-    if not move_ids:
         return []
 
     _, bills = _fetch_moves_by_ids(odoo, move_ids)
@@ -1073,25 +1018,6 @@ def _fetch_invoices_for_analytic(odoo, account_id):
             'Invoice lookup via analytic_distribution failed for account_id=%s: %s',
             account_id, exc,
         )
-
-    if not candidate_moves:
-        try:
-            rows = odoo.search_read(
-                'account.move.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['move_id'],
-                limit=2000,
-            )
-            for r in rows:
-                mv = r.get('move_id')
-                mv = mv[0] if isinstance(mv, (list, tuple)) else mv
-                if mv:
-                    candidate_moves.add(mv)
-        except Exception as exc:
-            logger.warning(
-                'Invoice fallback via legacy analytic_account_id failed for account_id=%s: %s',
-                account_id, exc,
-            )
 
     if candidate_moves:
         filtered = odoo.search_read(

@@ -391,3 +391,83 @@ def export_data(report_type):
     except Exception as e:
         flash(f'Export error: {e}', 'danger')
         return redirect(url_for('jobcosting.jobs_dashboard'))
+
+
+@bp.route('/debug/analytic/<int:account_id>')
+@odoo_user_required
+def debug_analytic(account_id):
+    """Diagnostic: dump the analytic account + raw PO/bill line samples
+    so we can see exactly how Odoo serialises analytic_distribution for
+    this install. Used to debug empty PO/Bills tabs.
+    """
+    odoo = current_app.odoo
+    out = {'account_id': account_id}
+
+    try:
+        acct = odoo.search_read(
+            'account.analytic.account',
+            [('id', '=', account_id)],
+            fields=['id', 'name', 'code', 'plan_id', 'partner_id'],
+        )
+        out['account'] = acct[0] if acct else None
+    except Exception as e:
+        out['account_error'] = str(e)
+
+    # Find the project linked to this analytic (or any analytic that
+    # shares a name with this one). This helps identify multi-plan setups.
+    try:
+        out['projects_linked_here'] = odoo.search_read(
+            'project.project',
+            [('analytic_account_id', '=', account_id)],
+            fields=['id', 'name', 'analytic_account_id'],
+        )
+    except Exception as e:
+        out['projects_error'] = str(e)
+
+    # List every analytic account with the same name (catches the case
+    # where an id mismatch is the cause).
+    try:
+        if out.get('account'):
+            out['same_name_accounts'] = odoo.search_read(
+                'account.analytic.account',
+                [('name', '=', out['account']['name'])],
+                fields=['id', 'name', 'code', 'plan_id'],
+            )
+    except Exception as e:
+        out['same_name_error'] = str(e)
+
+    # Sample raw PO lines that substring-match this id.
+    try:
+        out['po_line_sample'] = odoo.search_read(
+            'purchase.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'order_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['po_line_error'] = str(e)
+
+    # Sample raw move lines that substring-match this id.
+    try:
+        out['move_line_sample'] = odoo.search_read(
+            'account.move.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'move_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['move_line_error'] = str(e)
+
+    # Show the first few PO lines in the system that HAVE any
+    # analytic_distribution — so we can see the real key format.
+    try:
+        out['any_po_line_with_distribution'] = odoo.search_read(
+            'purchase.order.line',
+            [('analytic_distribution', '!=', False)],
+            fields=['id', 'order_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['any_po_line_error'] = str(e)
+
+    return jsonify(out)
