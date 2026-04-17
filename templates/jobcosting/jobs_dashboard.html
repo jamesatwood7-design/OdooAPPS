@@ -3,24 +3,28 @@
 {% block title %}Jobs - Dashboard{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-briefcase"></i> Jobs</h2>
-    <div>
-        <!-- View Toggle -->
-        <div class="btn-group me-2" role="group">
-            <button type="button" class="btn btn-outline-secondary active" id="listViewBtn" onclick="setView('list')">
-                <i class="bi bi-list-ul"></i> List
+<div class="jobs-toolbar d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div class="input-group input-group-sm jobs-search">
+        <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
+        <input type="text" id="jobSearch" class="form-control" placeholder="Search jobs by name, customer, salesman…">
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+            <button type="button" class="btn btn-outline-secondary active" id="listViewBtn" onclick="setView('list')"
+                    title="List view">
+                <i class="bi bi-list-ul"></i>
             </button>
-            <button type="button" class="btn btn-outline-secondary" id="cardViewBtn" onclick="setView('card')">
-                <i class="bi bi-grid-3x3-gap"></i> Cards
+            <button type="button" class="btn btn-outline-secondary" id="cardViewBtn" onclick="setView('card')"
+                    title="Card view">
+                <i class="bi bi-grid-3x3-gap"></i>
             </button>
         </div>
-        <!-- Column Selector (list view only) -->
-        <div class="btn-group me-2" id="colSelectorWrap">
-            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
-                <i class="bi bi-columns-gap"></i> Columns
+        <div class="btn-group btn-group-sm" id="colSelectorWrap">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                    title="Show / hide columns">
+                <i class="bi bi-columns-gap"></i>
             </button>
-            <ul class="dropdown-menu dropdown-menu-end p-2" id="colSelector" style="min-width: 200px;">
+            <ul class="dropdown-menu dropdown-menu-end p-2" id="colSelector" style="min-width: 220px;">
                 {% for label, sort_type in columns %}
                 <li>
                     <label class="dropdown-item py-1">
@@ -31,39 +35,30 @@
                 {% endfor %}
             </ul>
         </div>
-        <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-primary">
-            <i class="bi bi-plus-circle"></i> New Entry
+        <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Entry
         </a>
     </div>
 </div>
 
-<!-- Filter & Search Bar (always visible) -->
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <div class="d-flex align-items-center flex-wrap gap-2">
-            {% if status_options %}
-            <span class="text-muted me-2"><i class="bi bi-funnel"></i> Status:</span>
-            <button class="btn btn-sm btn-outline-dark status-filter {% if not default_status %}active{% endif %}" data-status="all">All</button>
-            {% for status in status_options %}
-            <button class="btn btn-sm {% if status == default_status %}btn-primary{% else %}btn-outline-primary{% endif %} status-filter"
-                    data-status="{{ status }}">{{ status }}</button>
-            {% endfor %}
-            {% endif %}
-            <span class="ms-auto">
-                <div class="input-group input-group-sm" style="width: 250px;">
-                    <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" id="jobSearch" class="form-control" placeholder="Search jobs...">
-                </div>
-            </span>
-            <small class="text-muted ms-2">
-                <span id="jobCount">{{ jobs|length }}</span> jobs
-            </small>
-        </div>
-    </div>
+{% if status_options %}
+<div class="status-chips mb-3">
+    <button class="status-chip {% if not default_status %}active{% endif %}" data-status="all">
+        All <span class="count">{{ jobs|length }}</span>
+    </button>
+    {% for status in status_options %}
+        <button class="status-chip {% if status == default_status %}active{% endif %}"
+                data-status="{{ status }}">
+            {{ status }} <span class="count">{{ status_counts.get(status, 0) }}</span>
+        </button>
+    {% endfor %}
+    <span class="ms-auto text-muted small">
+        Showing <strong id="jobCount">{{ jobs|length }}</strong> of {{ jobs|length }}
+    </span>
 </div>
+{% endif %}
 
 {% if jobs %}
-<!-- LIST VIEW -->
 <div id="listView">
     <div class="table-responsive">
         <table class="table table-sm table-striped table-hover job-table" id="jobsTable">
@@ -111,7 +106,6 @@
     </div>
 </div>
 
-<!-- CARD VIEW -->
 <div id="cardView" class="d-none">
     <div class="row g-3">
         {% for job in jobs %}
@@ -173,32 +167,22 @@
 
 {% block extra_scripts %}
 <script>
-// Default to 'all' if no status options exist or default doesn't match any data
 var defaultStatus = '{{ default_status }}';
 var hasStatusFilter = {{ 'true' if status_options else 'false' }};
 var currentStatus = hasStatusFilter ? defaultStatus : 'all';
 var currentView = localStorage.getItem('jobsView') || 'list';
 
-// --- Status Filter ---
-document.querySelectorAll('.status-filter').forEach(function(btn) {
+document.querySelectorAll('.status-chip').forEach(function(btn) {
     btn.addEventListener('click', function() {
         currentStatus = this.dataset.status;
-        document.querySelectorAll('.status-filter').forEach(function(b) {
-            b.classList.remove('btn-primary', 'active');
-            b.classList.add('btn-outline-primary');
+        document.querySelectorAll('.status-chip').forEach(function(b) {
+            b.classList.remove('active');
         });
-        if (this.dataset.status === 'all') {
-            this.classList.remove('btn-outline-primary');
-            this.classList.add('btn-outline-dark', 'active');
-        } else {
-            this.classList.remove('btn-outline-primary');
-            this.classList.add('btn-primary');
-        }
+        this.classList.add('active');
         applyFilters();
     });
 });
 
-// --- Search ---
 var searchInput = document.getElementById('jobSearch');
 if (searchInput) {
     searchInput.addEventListener('input', function() { applyFilters(); });
@@ -208,7 +192,6 @@ function applyFilters() {
     var query = (searchInput ? searchInput.value : '').toLowerCase().trim();
     var count = 0;
 
-    // List view rows
     document.querySelectorAll('#jobsTable tbody tr').forEach(function(row) {
         var status = row.dataset.status || '';
         var text = row.textContent.toLowerCase();
@@ -219,7 +202,6 @@ function applyFilters() {
         if (visible) count++;
     });
 
-    // Card view
     document.querySelectorAll('.job-card-wrap').forEach(function(card) {
         var status = card.dataset.status || '';
         var text = card.textContent.toLowerCase();
@@ -230,23 +212,17 @@ function applyFilters() {
 
     document.getElementById('jobCount').textContent = count;
 
-    // If default filter shows 0 results, auto-switch to "all"
+    // If the default filter shows 0 results, fall back to 'all' so the page isn't blank on first load.
     if (count === 0 && currentStatus !== 'all' && !query) {
         currentStatus = 'all';
-        document.querySelectorAll('.status-filter').forEach(function(b) {
-            b.classList.remove('btn-primary', 'active');
-            b.classList.add('btn-outline-primary');
-            if (b.dataset.status === 'all') {
-                b.classList.remove('btn-outline-primary');
-                b.classList.add('btn-outline-dark', 'active');
-            }
+        document.querySelectorAll('.status-chip').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.status === 'all');
         });
         applyFilters();
         return;
     }
 }
 
-// --- View Toggle ---
 function setView(view) {
     currentView = view;
     localStorage.setItem('jobsView', view);
@@ -265,7 +241,6 @@ function setView(view) {
     }
 }
 
-// --- Column Selector ---
 var savedCols = JSON.parse(localStorage.getItem('jobsCols') || 'null');
 
 document.querySelectorAll('.col-toggle').forEach(function(cb) {
@@ -299,7 +274,6 @@ function saveCols() {
     localStorage.setItem('jobsCols', JSON.stringify(state));
 }
 
-// --- Sorting ---
 var headers = document.querySelectorAll('#jobsTable th.sortable');
 var tbody = document.querySelector('#jobsTable tbody');
 var currentSort = { col: -1, asc: true };
@@ -345,7 +319,6 @@ function getCellSortValue(row, colIndex, sortType) {
     return String(val).toLowerCase();
 }
 
-// --- Init ---
 setView(currentView);
 applyFilters();
 </script>

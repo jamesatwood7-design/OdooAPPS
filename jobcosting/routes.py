@@ -178,6 +178,7 @@ def jobs_dashboard():
         columns=data.get('columns', []),
         jobs=data.get('jobs', []),
         status_options=data.get('status_options', []),
+        status_counts=data.get('status_counts', {}),
         default_status=data.get('default_status', 'In Progress'),
     )
 

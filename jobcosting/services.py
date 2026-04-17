@@ -404,13 +404,15 @@ def get_job_dashboard_data(odoo):
             })
         formatted_jobs.append(row)
 
-    # Get unique status values for the filter bar
-    status_values = sorted(set(j['status'] for j in formatted_jobs if j['status']))
+    from collections import Counter
+    status_counts = Counter(j['status'] for j in formatted_jobs if j['status'])
+    status_values = sorted(status_counts.keys())
 
     return {
-        'columns': [(c[0], c[2]) for c in columns],  # (label, sort_type)
+        'columns': [(c[0], c[2]) for c in columns],
         'jobs': formatted_jobs,
         'status_options': status_values,
+        'status_counts': dict(status_counts),
         'default_status': 'In Progress',
     }
 
