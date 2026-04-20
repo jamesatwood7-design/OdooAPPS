@@ -220,76 +220,101 @@ def bill_list():
 # Transactions
 # ---------------------------------------------------------------------------
 
-@bp.route('/invoice/create', methods=['GET', 'POST'])
-@permission_required('accounting', 'write')
-def create_invoice():
+def _handle_move_create(kind):
+    """Shared POST/GET handler for the create-invoice and create-bill routes."""
     odoo = current_app.odoo
+    is_invoice = (kind == 'invoice')
 
     if request.method == 'POST':
+        import base64
+
         try:
             partner_id = request.form.get('partner_id', type=int)
+            if not partner_id:
+                flash(f'Please select a {"customer" if is_invoice else "vendor"}.', 'warning')
+                return redirect(request.path)
+
             invoice_date = request.form.get('invoice_date', date.today().isoformat())
+            name = (request.form.get('name') or '').strip() or None
             ref = request.form.get('ref', '')
             analytic_id = request.form.get('analytic_id', type=int)
+            payment_term_id = request.form.get('payment_term_id', type=int)
+            date_due = request.form.get('date_due') or None
+            user_id = request.form.get('user_id', type=int)
+            subject = request.form.get('subject', '')
+            customer_notes = request.form.get('customer_notes', '')
+            terms = request.form.get('terms', '')
+            action = request.form.get('action', 'draft')  # 'draft' or 'send'
 
             lines = _parse_lines(request.form)
             if not lines:
                 flash('Please add at least one line.', 'warning')
-                return redirect(url_for('accounting.create_invoice'))
+                return redirect(request.path)
 
-            move_id = transactions.create_invoice(
-                odoo, partner_id, invoice_date, lines, ref=ref, analytic_id=analytic_id
+            creator = transactions.create_invoice if is_invoice else transactions.create_bill
+            move_id = creator(
+                odoo, partner_id, invoice_date, lines,
+                ref=ref, analytic_id=analytic_id,
+                name=name, payment_term_id=payment_term_id,
+                date_due=date_due, user_id=user_id,
+                subject=subject, customer_notes=customer_notes, terms=terms,
             )
-            flash(f'Invoice created successfully.', 'success')
+
+            files = request.files.getlist('attachments')
+            for f in files:
+                if not f or not f.filename:
+                    continue
+                try:
+                    data = base64.b64encode(f.read()).decode('utf-8')
+                    transactions.upload_attachment(
+                        odoo, move_id, f.filename, data,
+                        f.mimetype or 'application/octet-stream',
+                    )
+                except Exception as upload_err:
+                    current_app.logger.warning(
+                        'Attachment upload failed on move %s: %s',
+                        move_id, upload_err,
+                    )
+                    flash(f'"{f.filename}" could not be uploaded: {upload_err}', 'warning')
+
+            if action == 'send':
+                try:
+                    transactions.post_move(odoo, move_id)
+                    flash(f'{"Invoice" if is_invoice else "Bill"} created and posted.', 'success')
+                except Exception as post_err:
+                    flash(f'{"Invoice" if is_invoice else "Bill"} created but could not be posted: {post_err}', 'warning')
+            else:
+                flash(f'{"Invoice" if is_invoice else "Bill"} saved as draft.', 'success')
+
             return redirect(url_for('accounting.view_move', move_id=move_id))
         except Exception as e:
             flash(f'Error: {e}', 'danger')
 
-    return render_template('accounting/create_move.html',
-                           move_type='invoice',
-                           title='Create Customer Invoice',
-                           partners=transactions.get_partners(odoo, 'customer'),
-                           products=transactions.get_products(odoo, sale=True),
-                           accounts=transactions.get_accounts(odoo),
-                           analytics=transactions.get_analytic_accounts(odoo),
-                           taxes=transactions.get_taxes(odoo, 'sale'),
-                           today=date.today().isoformat())
+    return render_template(
+        'accounting/create_move.html',
+        move_type=kind,
+        title='Create Customer Invoice' if is_invoice else 'Create Vendor Bill',
+        partners=transactions.get_partners(odoo, 'customer' if is_invoice else 'supplier'),
+        products=transactions.get_products(odoo, sale=is_invoice),
+        accounts=transactions.get_accounts(odoo),
+        analytics=transactions.get_analytic_accounts(odoo),
+        taxes=transactions.get_taxes(odoo, 'sale' if is_invoice else 'purchase'),
+        payment_terms=transactions.get_payment_terms(odoo),
+        salespersons=transactions.get_salespersons(odoo),
+        today=date.today().isoformat(),
+    )
+
+
+@bp.route('/invoice/create', methods=['GET', 'POST'])
+@permission_required('accounting', 'write')
+def create_invoice():
+    return _handle_move_create('invoice')
 
 
 @bp.route('/bill/create', methods=['GET', 'POST'])
 @permission_required('accounting', 'write')
 def create_bill():
-    odoo = current_app.odoo
-
-    if request.method == 'POST':
-        try:
-            partner_id = request.form.get('partner_id', type=int)
-            invoice_date = request.form.get('invoice_date', date.today().isoformat())
-            ref = request.form.get('ref', '')
-            analytic_id = request.form.get('analytic_id', type=int)
-
-            lines = _parse_lines(request.form)
-            if not lines:
-                flash('Please add at least one line.', 'warning')
-                return redirect(url_for('accounting.create_bill'))
-
-            move_id = transactions.create_bill(
-                odoo, partner_id, invoice_date, lines, ref=ref, analytic_id=analytic_id
-            )
-            flash(f'Bill created successfully.', 'success')
-            return redirect(url_for('accounting.view_move', move_id=move_id))
-        except Exception as e:
-            flash(f'Error: {e}', 'danger')
-
-    return render_template('accounting/create_move.html',
-                           move_type='bill',
-                           title='Create Vendor Bill',
-                           partners=transactions.get_partners(odoo, 'supplier'),
-                           products=transactions.get_products(odoo, sale=False),
-                           accounts=transactions.get_accounts(odoo),
-                           analytics=transactions.get_analytic_accounts(odoo),
-                           taxes=transactions.get_taxes(odoo, 'purchase'),
-                           today=date.today().isoformat())
+    return _handle_move_create('bill')
 
 
 @bp.route('/payment/create', methods=['GET', 'POST'])
@@ -589,11 +614,10 @@ def reconcile_match():
 # ---------------------------------------------------------------------------
 
 def _parse_lines(form):
-    """Parse invoice/bill lines from form data."""
+    """Parse invoice/bill lines from form data. Includes per-line discount."""
     lines = []
     i = 0
     while True:
-        # Check for either product or name based line
         if f'line_name_{i}' not in form and f'line_product_{i}' not in form:
             break
 
@@ -601,10 +625,13 @@ def _parse_lines(form):
         name = form.get(f'line_name_{i}', '')
         qty = float(form.get(f'line_qty_{i}', 1) or 1)
         price = float(form.get(f'line_price_{i}', 0) or 0)
+        discount = float(form.get(f'line_discount_{i}', 0) or 0)
         tax_id = form.get(f'line_tax_{i}', type=int)
 
         if name or product_id:
             line = {'name': name, 'quantity': qty, 'price_unit': price}
+            if discount:
+                line['discount'] = discount
             if product_id:
                 line['product_id'] = product_id
             if tax_id:

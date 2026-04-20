@@ -98,6 +98,32 @@ def get_analytic_accounts(odoo):
     )
 
 
+def get_payment_terms(odoo):
+    """Payment terms (Due on Receipt, Net 15, Net 30, …) for the Terms dropdown."""
+    try:
+        return odoo.safe_search_read(
+            'account.payment.term',
+            [('active', '=', True)],
+            fields=['id', 'name'],
+            order='sequence asc, name asc',
+        )
+    except Exception:
+        return []
+
+
+def get_salespersons(odoo):
+    """Internal users assignable as salesperson on a move."""
+    try:
+        return odoo.safe_search_read(
+            'res.users',
+            [('share', '=', False), ('active', '=', True)],
+            fields=['id', 'name'],
+            order='name asc',
+        )
+    except Exception:
+        return []
+
+
 def _build_move_lines(lines, analytic_id=None):
     """Build invoice_line_ids from parsed line data.
 
@@ -109,6 +135,8 @@ def _build_move_lines(lines, analytic_id=None):
             'quantity': line.get('quantity', 1),
             'price_unit': line.get('price_unit', 0),
         }
+        if line.get('discount'):
+            line_vals['discount'] = line['discount']
         if line.get('product_id'):
             line_vals['product_id'] = line['product_id']
         if line.get('name'):
@@ -124,39 +152,69 @@ def _build_move_lines(lines, analytic_id=None):
     return invoice_lines
 
 
-def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
-                   ref=None, analytic_id=None):
+def _compose_narration(subject='', customer_notes='', terms=''):
+    """Merge the three free-text fields into the single Odoo narration field,
+    with section headers when multiple parts are present.
+    """
+    parts = []
+    subject = (subject or '').strip()
+    customer_notes = (customer_notes or '').strip()
+    terms = (terms or '').strip()
+    if subject:
+        parts.append(subject)
+    if customer_notes:
+        parts.append(customer_notes)
+    if terms:
+        parts.append('Terms & Conditions:\n' + terms)
+    return '\n\n'.join(parts)
+
+
+def _create_move(odoo, move_type, partner_id, invoice_date, lines,
+                 journal_id=None, ref=None, analytic_id=None,
+                 name=None, payment_term_id=None, date_due=None,
+                 user_id=None, subject='', customer_notes='', terms=''):
+    """Create an account.move draft with the extended field set the Zoho-style
+    form collects. Used by create_invoice and create_bill.
+    """
+    narration = _compose_narration(subject, customer_notes, terms)
+    move_vals = {
+        'move_type': move_type,
+        'partner_id': partner_id,
+        'invoice_date': invoice_date,
+        'ref': ref or '',
+        'invoice_line_ids': _build_move_lines(lines, analytic_id),
+    }
+    if journal_id:
+        move_vals['journal_id'] = journal_id
+    if name:
+        move_vals['name'] = name
+    if payment_term_id:
+        move_vals['invoice_payment_term_id'] = payment_term_id
+    if date_due:
+        move_vals['invoice_date_due'] = date_due
+    if user_id:
+        move_vals['user_id'] = user_id
+    if narration:
+        move_vals['narration'] = narration
+
+    return odoo.create('account.move', move_vals)
+
+
+def create_invoice(odoo, partner_id, invoice_date, lines, **kwargs):
     """Create a customer invoice (account.move with move_type='out_invoice').
 
-    When lines have product_id, Odoo auto-fills account, taxes, and description.
+    Accepts the extended keyword set — name, payment_term_id, date_due,
+    user_id, subject, customer_notes, terms — as well as the original
+    journal_id / ref / analytic_id.
     """
-    move_vals = {
-        'move_type': 'out_invoice',
-        'partner_id': partner_id,
-        'invoice_date': invoice_date,
-        'ref': ref or '',
-        'invoice_line_ids': _build_move_lines(lines, analytic_id),
-    }
-    if journal_id:
-        move_vals['journal_id'] = journal_id
-
-    return odoo.create('account.move', move_vals)
+    return _create_move(odoo, 'out_invoice', partner_id, invoice_date,
+                        lines, **kwargs)
 
 
-def create_bill(odoo, partner_id, invoice_date, lines, journal_id=None,
-                ref=None, analytic_id=None):
+def create_bill(odoo, partner_id, invoice_date, lines, **kwargs):
     """Create a vendor bill (account.move with move_type='in_invoice')."""
-    move_vals = {
-        'move_type': 'in_invoice',
-        'partner_id': partner_id,
-        'invoice_date': invoice_date,
-        'ref': ref or '',
-        'invoice_line_ids': _build_move_lines(lines, analytic_id),
-    }
-    if journal_id:
-        move_vals['journal_id'] = journal_id
-
-    return odoo.create('account.move', move_vals)
+    return _create_move(odoo, 'in_invoice', partner_id, invoice_date,
+                        lines, **kwargs)
 
 
 def create_payment(odoo, partner_id, amount, payment_date, payment_type,

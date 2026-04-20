@@ -2,117 +2,327 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-{% if move_type == 'invoice' %}receipt{% else %}file-earmark-text{% endif %}"></i> {{ title }}</h2>
-</div>
+<form method="POST" enctype="multipart/form-data" class="invoice-form" id="invoiceForm">
+    <input type="hidden" name="action" id="actionField" value="draft">
 
-<form method="POST">
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">{% if move_type == 'invoice' %}Customer{% else %}Vendor{% endif %} <span class="text-danger">*</span></label>
-                    <select name="partner_id" class="form-select" required>
-                        <option value="">-- Select --</option>
-                        {% for p in partners %}
-                            <option value="{{ p.id }}">{{ p.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Date</label>
-                    <input type="date" name="invoice_date" class="form-control" value="{{ today }}">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Job (Analytic)</label>
-                    <select name="analytic_id" class="form-select">
-                        <option value="">-- None --</option>
-                        {% for a in analytics %}
-                            <option value="{{ a.id }}">{% if a.code %}[{{ a.code }}] {% endif %}{{ a.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Reference</label>
-                    <input type="text" name="ref" class="form-control" placeholder="PO #, etc.">
-                </div>
+    <!-- Header: party + job link -->
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold">
+                    {% if move_type == 'invoice' %}Customer{% else %}Vendor{% endif %}
+                    <span class="text-danger">*</span>
+                </label>
+                <select name="partner_id" class="form-select" required>
+                    <option value="">-- Select --</option>
+                    {% for p in partners %}
+                        <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Job (Analytic)</label>
+                <select name="analytic_id" class="form-select">
+                    <option value="">-- None --</option>
+                    {% for a in analytics %}
+                        <option value="{{ a.id }}">{% if a.code %}[{{ a.code }}] {% endif %}{{ a.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
         </div>
     </div>
 
-    <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between">
-            <h5 class="mb-0">Lines</h5>
-            <button type="button" class="btn btn-sm btn-outline-success" onclick="addLine()">
-                <i class="bi bi-plus"></i> Add Line
-            </button>
+    <!-- Metadata grid -->
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">{% if move_type == 'invoice' %}Invoice #{% else %}Bill #{% endif %}</label>
+                <input type="text" name="name" class="form-control"
+                       placeholder="Auto-number on post">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Order Number</label>
+                <input type="text" name="ref" class="form-control" placeholder="PO #, SO #, etc.">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Salesperson</label>
+                <select name="user_id" class="form-select">
+                    <option value="">-- None --</option>
+                    {% for u in salespersons %}
+                        <option value="{{ u.id }}">{{ u.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">{% if move_type == 'invoice' %}Invoice{% else %}Bill{% endif %} Date</label>
+                <input type="date" name="invoice_date" class="form-control" value="{{ today }}"
+                       id="invoiceDate" onchange="recomputeDueDate()">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Terms</label>
+                <select name="payment_term_id" class="form-select" id="termsSelect"
+                        onchange="recomputeDueDate()">
+                    <option value="">-- None --</option>
+                    {% for t in payment_terms %}
+                        <option value="{{ t.id }}" data-name="{{ t.name }}">{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Due Date</label>
+                <input type="date" name="date_due" class="form-control" id="dueDate">
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Subject</label>
+                <input type="text" name="subject" class="form-control"
+                       placeholder="Let your customer know what this is for">
+            </div>
         </div>
-        <div class="card-body p-0">
-            <table class="table table-sm mb-0" style="font-size: 0.9rem;">
-                <thead class="table-light">
+    </div>
+
+    <!-- Item table -->
+    <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing: 0.5px;">Item Table</h6>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm invoice-lines mb-0">
+                <thead>
                     <tr>
-                        <th style="width: 25%">Product</th>
+                        <th style="width: 30%">Item Details</th>
                         <th>Description</th>
-                        <th style="width:80px">Qty</th>
-                        <th style="width:120px">Unit Price</th>
-                        <th style="width:160px">Tax</th>
-                        <th style="width:110px">Subtotal</th>
+                        <th class="text-end" style="width:90px">Quantity</th>
+                        <th class="text-end" style="width:110px">Rate</th>
+                        <th class="text-end" style="width:110px">Discount %</th>
+                        <th style="width:170px">Tax</th>
+                        <th class="text-end" style="width:120px">Amount</th>
                         <th style="width:40px"></th>
                     </tr>
                 </thead>
                 <tbody id="linesBody">
                     <tr>
-                        <td><select name="line_product_0" class="form-select form-select-sm" onchange="onProductSelect(this, 0)">
-                            <option value="">-- No Product --</option>
-                            {% for p in products %}<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}">{{ p.display_name }}</option>{% endfor %}
-                        </select></td>
+                        <td>
+                            <select name="line_product_0" class="form-select form-select-sm"
+                                    onchange="onProductSelect(this, 0)">
+                                <option value="">-- No Product --</option>
+                                {% for p in products %}
+                                <option value="{{ p.id }}"
+                                        data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}"
+                                        data-name="{{ p.name }}"
+                                        data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}">
+                                    {{ p.display_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
                         <td><input type="text" name="line_name_0" class="form-control form-control-sm" placeholder="Description"></td>
-                        <td><input type="number" name="line_qty_0" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>
-                        <td><input type="number" name="line_price_0" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>
-                        <td><select name="line_tax_0" class="form-select form-select-sm">
-                            <option value="">No Tax</option>
-                            {% for t in taxes %}<option value="{{ t.id }}">{{ t.display_name }}</option>{% endfor %}
-                        </select></td>
-                        <td class="text-end line-subtotal fw-bold align-middle">$0.00</td>
-                        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>
+                        <td><input type="number" name="line_qty_0" class="form-control form-control-sm text-end" value="1" step="any" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_price_0" class="form-control form-control-sm text-end" step="0.01" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_discount_0" class="form-control form-control-sm text-end" step="0.01" placeholder="0" oninput="calcTotal()"></td>
+                        <td>
+                            <select name="line_tax_0" class="form-select form-select-sm" onchange="calcTotal()">
+                                <option value="">No Tax</option>
+                                {% for t in taxes %}
+                                <option value="{{ t.id }}" data-amount="{{ t.amount }}">{{ t.display_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-end line-subtotal fw-semibold align-middle">$0.00</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-link text-danger p-0"
+                                    onclick="this.closest('tr').remove();calcTotal()">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
                     </tr>
                 </tbody>
-                <tfoot>
-                    <tr class="fw-bold fs-6">
-                        <td colspan="5" class="text-end">Subtotal (before tax):</td>
-                        <td class="text-end" id="grandTotal">$0.00</td>
-                        <td></td>
-                    </tr>
-                </tfoot>
             </table>
+        </div>
+        <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addLine()">
+                <i class="bi bi-plus-circle"></i> Add New Row
+            </button>
         </div>
     </div>
 
-    <div class="d-flex justify-content-end gap-2">
-        <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> Create</button>
+    <!-- Notes + Totals -->
+    <div class="form-section">
+        <div class="row g-4">
+            <div class="col-md-7">
+                <label class="form-label fw-semibold">Customer Notes</label>
+                <textarea name="customer_notes" class="form-control" rows="3"
+                          placeholder="Thanks for your business."></textarea>
+                <small class="text-muted">Will be displayed on the invoice.</small>
+            </div>
+            <div class="col-md-5">
+                <div class="totals-panel">
+                    <div class="totals-row">
+                        <span class="totals-label">Sub Total</span>
+                        <span class="totals-value" id="subTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row">
+                        <span class="totals-label">Discount</span>
+                        <span class="totals-value" id="discountTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row">
+                        <span class="totals-label">Tax</span>
+                        <span class="totals-value" id="taxTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row grand">
+                        <span class="totals-label">Total ($)</span>
+                        <span class="totals-value" id="grandTotal">$0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terms + attachments -->
+    <div class="form-section">
+        <div class="row g-4">
+            <div class="col-md-7">
+                <label class="form-label fw-semibold">Terms &amp; Conditions</label>
+                <textarea name="terms" class="form-control" rows="3"
+                          placeholder="Payment terms, late fees, etc."></textarea>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label fw-semibold">Attach File(s)</label>
+                <input type="file" name="attachments" class="form-control" multiple
+                       accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.csv">
+                <small class="text-muted">You can upload multiple files (PDF, images, documents).</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sticky footer -->
+    <div class="invoice-footer">
+        <div class="invoice-footer-summary">
+            <span class="text-muted small">Total Amount</span>
+            <strong class="ms-2" id="footerTotal">$0.00</strong>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('accounting.invoice_list' if move_type == 'invoice' else 'accounting.bill_list') }}"
+               class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-outline-primary"
+                    onclick="document.getElementById('actionField').value='draft'">
+                Save as Draft
+            </button>
+            <button type="submit" class="btn btn-primary"
+                    onclick="document.getElementById('actionField').value='send'">
+                Save and Post
+            </button>
+        </div>
     </div>
 </form>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.invoice-form { padding-bottom: 80px; }
+.form-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+.form-section .form-label {
+    font-size: 0.82rem;
+    color: #475569;
+    margin-bottom: 4px;
+}
+.form-section .form-label.fw-semibold {
+    color: #334155;
+}
+.invoice-lines th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.invoice-lines td {
+    vertical-align: middle;
+    padding: 6px 8px;
+}
+.invoice-lines .form-control-sm,
+.invoice-lines .form-select-sm {
+    font-size: 0.85rem;
+}
+
+.totals-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+.totals-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+}
+.totals-row + .totals-row {
+    border-top: 1px dashed #e2e8f0;
+}
+.totals-row .totals-label { color: #475569; font-size: 0.9rem; }
+.totals-row .totals-value { font-weight: 600; color: #0f172a; }
+.totals-row.grand {
+    margin-top: 6px;
+    border-top: 2px solid #334155 !important;
+    padding-top: 10px;
+}
+.totals-row.grand .totals-label,
+.totals-row.grand .totals-value {
+    font-size: 1.05rem;
+    color: #0f172a;
+}
+
+.invoice-footer {
+    position: fixed;
+    bottom: 0;
+    left: var(--sidebar-width, 240px);
+    right: 0;
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
+    z-index: 900;
+    transition: left 0.2s ease;
+}
+.sidebar.collapsed ~ .main-content .invoice-footer {
+    left: var(--sidebar-collapsed-width, 64px);
+}
+@media (max-width: 991.98px) {
+    .invoice-footer { left: 0; }
+}
+</style>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
 var lineCount = 1;
 
-// Build options strings for dynamic rows
 var productOptions = '<option value="">-- No Product --</option>';
 {% for p in products %}
-productOptions += '<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == "invoice" else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == "invoice" else p.supplier_taxes_id }}">{{ p.display_name }}</option>';
+productOptions += '<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == "invoice" else p.standard_price }}" data-name="{{ p.name|e }}" data-taxes="{{ p.taxes_id if move_type == "invoice" else p.supplier_taxes_id }}">{{ p.display_name|e }}</option>';
 {% endfor %}
 
 var taxOptions = '<option value="">No Tax</option>';
 {% for t in taxes %}
-taxOptions += '<option value="{{ t.id }}">{{ t.display_name }}</option>';
+taxOptions += '<option value="{{ t.id }}" data-amount="{{ t.amount }}">{{ t.display_name|e }}</option>';
 {% endfor %}
 
 function onProductSelect(sel, idx) {
     var opt = sel.options[sel.selectedIndex];
     if (!opt || !opt.value) return;
-
     var price = opt.dataset.price || '';
     var name = opt.dataset.name || '';
     var taxes = opt.dataset.taxes || '';
@@ -125,7 +335,6 @@ function onProductSelect(sel, idx) {
     if (nameInput && !nameInput.value) nameInput.value = name;
     if (priceInput && !priceInput.value) priceInput.value = parseFloat(price) || '';
 
-    // Try to auto-select the first tax from the product's default taxes
     if (taxSelect && taxes) {
         try {
             var taxIds = JSON.parse(taxes.replace(/'/g, '"'));
@@ -139,33 +348,80 @@ function onProductSelect(sel, idx) {
             }
         } catch(e) {}
     }
-
     calcTotal();
 }
 
 function addLine() {
     var n = lineCount++;
     var tr = document.createElement('tr');
-    tr.innerHTML = '<td><select name="line_product_'+n+'" class="form-select form-select-sm" onchange="onProductSelect(this,'+n+')">'+productOptions+'</select></td>' +
-        '<td><input type="text" name="line_name_'+n+'" class="form-control form-control-sm" placeholder="Description"></td>' +
-        '<td><input type="number" name="line_qty_'+n+'" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>' +
-        '<td><input type="number" name="line_price_'+n+'" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>' +
-        '<td><select name="line_tax_'+n+'" class="form-select form-select-sm">'+taxOptions+'</select></td>' +
-        '<td class="text-end line-subtotal fw-bold align-middle">$0.00</td>' +
-        '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>';
+    tr.innerHTML =
+        '<td><select name="line_product_' + n + '" class="form-select form-select-sm" onchange="onProductSelect(this,' + n + ')">' + productOptions + '</select></td>' +
+        '<td><input type="text" name="line_name_' + n + '" class="form-control form-control-sm" placeholder="Description"></td>' +
+        '<td><input type="number" name="line_qty_' + n + '" class="form-control form-control-sm text-end" value="1" step="any" oninput="calcTotal()"></td>' +
+        '<td><input type="number" name="line_price_' + n + '" class="form-control form-control-sm text-end" step="0.01" oninput="calcTotal()"></td>' +
+        '<td><input type="number" name="line_discount_' + n + '" class="form-control form-control-sm text-end" step="0.01" placeholder="0" oninput="calcTotal()"></td>' +
+        '<td><select name="line_tax_' + n + '" class="form-select form-select-sm" onchange="calcTotal()">' + taxOptions + '</select></td>' +
+        '<td class="text-end line-subtotal fw-semibold align-middle">$0.00</td>' +
+        '<td><button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-x-lg"></i></button></td>';
     document.getElementById('linesBody').appendChild(tr);
 }
 
 function calcTotal() {
-    var total = 0;
+    var sub = 0, discountSum = 0, taxSum = 0;
     document.querySelectorAll('#linesBody tr').forEach(function(tr) {
-        var qty = parseFloat(tr.querySelector('[name*=qty]').value) || 0;
-        var price = parseFloat(tr.querySelector('[name*=price]').value) || 0;
-        var sub = qty * price;
-        tr.querySelector('.line-subtotal').textContent = '$' + sub.toFixed(2);
-        total += sub;
+        var qty = parseFloat(tr.querySelector('[name*="line_qty_"]').value) || 0;
+        var price = parseFloat(tr.querySelector('[name*="line_price_"]').value) || 0;
+        var disc = parseFloat(tr.querySelector('[name*="line_discount_"]').value) || 0;
+        var taxSel = tr.querySelector('[name*="line_tax_"]');
+        var taxRate = 0;
+        if (taxSel && taxSel.selectedIndex > 0) {
+            taxRate = parseFloat(taxSel.options[taxSel.selectedIndex].dataset.amount) || 0;
+        }
+        var gross = qty * price;
+        var discountAmt = gross * (disc / 100);
+        var net = gross - discountAmt;
+        var tax = net * (taxRate / 100);
+        tr.querySelector('.line-subtotal').textContent = fmt(net);
+        sub += gross;
+        discountSum += discountAmt;
+        taxSum += tax;
     });
-    document.getElementById('grandTotal').textContent = '$' + total.toFixed(2);
+    var grand = sub - discountSum + taxSum;
+    document.getElementById('subTotal').textContent = fmt(sub);
+    document.getElementById('discountTotal').textContent = '-' + fmt(discountSum);
+    document.getElementById('taxTotal').textContent = fmt(taxSum);
+    document.getElementById('grandTotal').textContent = fmt(grand);
+    document.getElementById('footerTotal').textContent = fmt(grand);
 }
+
+function fmt(n) {
+    return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+/* Best-effort due-date helper. Recognises common patterns in the term name
+ * (e.g. "Net 30", "Net 15", "Due on Receipt") so the user doesn't have to
+ * pick a date manually. Any other pattern leaves the field alone and the
+ * user fills it in themselves. */
+function recomputeDueDate() {
+    var dateEl = document.getElementById('invoiceDate');
+    var termEl = document.getElementById('termsSelect');
+    var dueEl = document.getElementById('dueDate');
+    if (!dateEl || !termEl || !dueEl || !dateEl.value) return;
+    var opt = termEl.options[termEl.selectedIndex];
+    if (!opt || !opt.value) return;
+    var label = (opt.dataset.name || opt.textContent || '').toLowerCase();
+    var days = null;
+    if (label.indexOf('receipt') !== -1) days = 0;
+    else {
+        var m = label.match(/\b(\d{1,3})\b/);
+        if (m) days = parseInt(m[1], 10);
+    }
+    if (days === null) return;
+    var d = new Date(dateEl.value + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    dueEl.value = d.toISOString().slice(0, 10);
+}
+
+document.addEventListener('DOMContentLoaded', calcTotal);
 </script>
 {% endblock %}
