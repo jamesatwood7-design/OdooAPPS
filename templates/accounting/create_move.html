@@ -12,7 +12,7 @@
 {% set existing_term_id     = move.invoice_payment_term_id[0]     if move and move.invoice_payment_term_id     else None %}
 {% set existing_analytic_id = None %}
 {% if move and move.invoice_lines %}
-    {% set first_line = move.invoice_lines | selectattr('display_type', 'falsy') | list | first %}
+    {% set first_line = move.invoice_lines[0] if move.invoice_lines else None %}
     {% if first_line %}
         {% set first_dist = first_line.analytic_distribution if first_line.analytic_distribution is mapping else None %}
         {% if first_dist and first_dist | length == 1 %}
@@ -733,7 +733,7 @@ button[aria-expanded="true"] .toggle-icon { transform: rotate(90deg); }
 {% block extra_scripts %}
 {% if not is_view %}
 <script>
-var lineCount = {{ (move.invoice_lines | selectattr('display_type', 'falsy') | list | length) if (move and move.invoice_lines) else 1 }};
+var lineCount = {{ move.invoice_lines | length if (move and move.invoice_lines) else 1 }};
 
 var productOptions = '<option value="">— No Product —</option>';
 {% for p in products %}
