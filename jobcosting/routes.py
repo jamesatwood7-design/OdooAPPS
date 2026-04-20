@@ -470,4 +470,52 @@ def debug_analytic(account_id):
     except Exception as e:
         out['any_po_line_error'] = str(e)
 
+    # SO lines tagged to this analytic — used to trace POs through sale_line_id.
+    so_line_ids = []
+    try:
+        raw_so = odoo.search_read(
+            'sale.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'order_id', 'name', 'analytic_distribution'],
+            limit=100,
+        )
+        verified = [
+            l for l in raw_so
+            if services._distribution_pct(account_id, l.get('analytic_distribution')) > 0
+        ]
+        so_line_ids = [l['id'] for l in verified]
+        out['so_lines_for_this_analytic_count'] = len(verified)
+        out['so_lines_sample'] = verified[:3]
+    except Exception as e:
+        out['so_lines_error'] = str(e)
+
+    # PO lines linked to those SO lines via sale_line_id.
+    if so_line_ids:
+        try:
+            po_via_so = odoo.search_read(
+                'purchase.order.line',
+                [('sale_line_id', 'in', so_line_ids)],
+                fields=['id', 'order_id', 'sale_line_id',
+                        'analytic_distribution', 'price_subtotal',
+                        'product_qty', 'qty_invoiced', 'price_unit'],
+                limit=100,
+            )
+            out['po_lines_via_sale_line_count'] = len(po_via_so)
+            out['po_lines_via_sale_line_sample'] = po_via_so[:5]
+        except Exception as e:
+            out['po_via_sale_line_error'] = str(e)
+
+    # Which PO line fields exist on this install (helps spot direct linkage
+    # fields like project_id, task_id added by enterprise modules).
+    try:
+        fields_def = odoo.fields_get('purchase.order.line')
+        interesting = sorted(
+            name for name in fields_def
+            if any(k in name.lower()
+                   for k in ['project', 'task', 'analytic', 'sale_line', 'account_'])
+        )
+        out['po_line_interesting_fields'] = interesting
+    except Exception as e:
+        out['po_fields_error'] = str(e)
+
     return jsonify(out)
