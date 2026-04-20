@@ -220,10 +220,18 @@ def bill_list():
 # Transactions
 # ---------------------------------------------------------------------------
 
-def _handle_move_create(kind):
-    """Shared POST/GET handler for the create-invoice and create-bill routes."""
+def _handle_move_create(kind, move=None):
+    """Shared POST/GET handler for create AND edit of invoices and bills.
+
+    When ``move`` is supplied, the page runs in edit mode: form submissions
+    update the existing record via Odoo write() rather than creating a new
+    one, and the template pre-fills every input with the current values.
+    Edit is only meaningful on draft moves (posted moves must be reset
+    first).
+    """
     odoo = current_app.odoo
     is_invoice = (kind == 'invoice')
+    is_edit = move is not None
 
     if request.method == 'POST':
         import base64
@@ -244,21 +252,28 @@ def _handle_move_create(kind):
             subject = request.form.get('subject', '')
             customer_notes = request.form.get('customer_notes', '')
             terms = request.form.get('terms', '')
-            action = request.form.get('action', 'draft')  # 'draft' or 'send'
+            action = request.form.get('action', 'draft')
 
             lines = _parse_lines(request.form)
             if not lines:
                 flash('Please add at least one line.', 'warning')
                 return redirect(request.path)
 
-            creator = transactions.create_invoice if is_invoice else transactions.create_bill
-            move_id = creator(
-                odoo, partner_id, invoice_date, lines,
+            kwargs = dict(
                 ref=ref, analytic_id=analytic_id,
                 name=name, payment_term_id=payment_term_id,
                 date_due=date_due, user_id=user_id,
                 subject=subject, customer_notes=customer_notes, terms=terms,
             )
+
+            if is_edit:
+                move_id = move['id']
+                transactions.update_move(
+                    odoo, move_id, partner_id, invoice_date, lines, **kwargs,
+                )
+            else:
+                creator = transactions.create_invoice if is_invoice else transactions.create_bill
+                move_id = creator(odoo, partner_id, invoice_date, lines, **kwargs)
 
             files = request.files.getlist('attachments')
             for f in files:
@@ -277,23 +292,43 @@ def _handle_move_create(kind):
                     )
                     flash(f'"{f.filename}" could not be uploaded: {upload_err}', 'warning')
 
+            label = 'Invoice' if is_invoice else 'Bill'
             if action == 'send':
                 try:
                     transactions.post_move(odoo, move_id)
-                    flash(f'{"Invoice" if is_invoice else "Bill"} created and posted.', 'success')
+                    flash(f'{label} {"updated" if is_edit else "created"} and posted.', 'success')
                 except Exception as post_err:
-                    flash(f'{"Invoice" if is_invoice else "Bill"} created but could not be posted: {post_err}', 'warning')
+                    flash(f'{label} {"updated" if is_edit else "created"} but could not be posted: {post_err}', 'warning')
             else:
-                flash(f'{"Invoice" if is_invoice else "Bill"} saved as draft.', 'success')
+                flash(
+                    f'{label} {"updated" if is_edit else "saved as draft"}.',
+                    'success',
+                )
 
             return redirect(url_for('accounting.view_move', move_id=move_id))
         except Exception as e:
             flash(f'Error: {e}', 'danger')
 
+    subject, customer_notes, terms = ('', '', '')
+    if is_edit:
+        subject, customer_notes, terms = transactions.parse_narration(
+            move.get('narration') or '',
+        )
+
+    if is_edit:
+        title = f'Edit {"Invoice" if is_invoice else "Bill"} {move.get("name") or ""}'.strip()
+    else:
+        title = 'Create Customer Invoice' if is_invoice else 'Create Vendor Bill'
+
     return render_template(
         'accounting/create_move.html',
         move_type=kind,
-        title='Create Customer Invoice' if is_invoice else 'Create Vendor Bill',
+        title=title,
+        is_edit=is_edit,
+        move=move,
+        prefill_subject=subject,
+        prefill_customer_notes=customer_notes,
+        prefill_terms=terms,
         partners=transactions.get_partners(odoo, 'customer' if is_invoice else 'supplier'),
         products=transactions.get_products(odoo, sale=is_invoice),
         accounts=transactions.get_accounts(odoo),
@@ -303,6 +338,41 @@ def _handle_move_create(kind):
         salespersons=transactions.get_salespersons(odoo),
         today=date.today().isoformat(),
     )
+
+
+@bp.route('/move/<int:move_id>/edit', methods=['GET', 'POST'])
+@permission_required('accounting', 'write')
+def edit_move(move_id):
+    odoo = current_app.odoo
+    try:
+        move = transactions.get_move(odoo, move_id)
+    except Exception as e:
+        flash(f'Error loading transaction: {e}', 'danger')
+        return redirect(url_for('accounting.invoice_list'))
+
+    if not move:
+        flash('Transaction not found.', 'warning')
+        return redirect(url_for('accounting.invoice_list'))
+
+    if move.get('state') != 'draft':
+        flash('Only draft transactions can be edited. Use "Reset to Draft" first.',
+              'warning')
+        return redirect(url_for('accounting.view_move', move_id=move_id))
+
+    kind = 'invoice' if move.get('move_type') in ('out_invoice', 'out_refund') else 'bill'
+    return _handle_move_create(kind, move=move)
+
+
+@bp.route('/move/<int:move_id>/reset-draft', methods=['POST'])
+@permission_required('accounting', 'write')
+def reset_move_to_draft(move_id):
+    odoo = current_app.odoo
+    try:
+        transactions.reset_move_to_draft(odoo, move_id)
+        flash('Transaction reset to draft — you can now edit it.', 'success')
+    except Exception as e:
+        flash(f'Could not reset to draft: {e}', 'danger')
+    return redirect(url_for('accounting.view_move', move_id=move_id))
 
 
 @bp.route('/invoice/create', methods=['GET', 'POST'])
@@ -436,8 +506,33 @@ def view_move(move_id):
     from auth.db import has_permission
     can_write = has_permission(session.get('permissions', {}),
                                'accounting', 'write')
-    return render_template('accounting/view_move.html', move=move,
-                           attachments=attachments, can_write=can_write)
+
+    subject, customer_notes, terms = transactions.parse_narration(
+        move.get('narration') or '',
+    )
+    is_invoice = move.get('move_type') in ('out_invoice', 'out_refund')
+    kind = 'invoice' if is_invoice else 'bill'
+
+    return render_template(
+        'accounting/create_move.html',
+        mode='view',
+        move_type=kind,
+        title=move.get('name') or 'Transaction',
+        move=move,
+        attachments=attachments,
+        can_write=can_write,
+        prefill_subject=subject,
+        prefill_customer_notes=customer_notes,
+        prefill_terms=terms,
+        analytics=transactions.get_analytic_accounts(odoo),
+        partners=[],
+        products=[],
+        accounts=[],
+        taxes=[],
+        payment_terms=[],
+        salespersons=[],
+        today=date.today().isoformat(),
+    )
 
 
 @bp.route('/move/<int:move_id>/upload', methods=['POST'])
