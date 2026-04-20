@@ -467,11 +467,9 @@ def _fetch_orders_by_ids(odoo, model, order_ids):
 def _find_orders_via_analytic_distribution(odoo, line_model, account_id):
     """Find order IDs via analytic_distribution on order lines (no state filter)."""
     try:
-        lines = odoo.search_read(
-            line_model,
-            [('analytic_distribution', 'ilike', str(account_id))],
+        lines = _search_lines_by_analytic(
+            odoo, line_model, account_id,
             fields=['order_id', 'analytic_distribution'],
-            limit=500,
         )
     except Exception as exc:
         logger.warning(
@@ -482,13 +480,13 @@ def _find_orders_via_analytic_distribution(odoo, line_model, account_id):
 
     order_ids = set()
     for line in lines:
-        dist = line.get('analytic_distribution')
-        if isinstance(dist, dict) and str(account_id) in dist:
-            oid = line.get('order_id')
-            if isinstance(oid, (list, tuple)):
-                order_ids.add(oid[0])
-            elif oid:
-                order_ids.add(oid)
+        if _distribution_pct(account_id, line.get('analytic_distribution')) <= 0:
+            continue
+        oid = line.get('order_id')
+        if isinstance(oid, (list, tuple)):
+            order_ids.add(oid[0])
+        elif oid:
+            order_ids.add(oid)
     return order_ids
 
 
@@ -540,6 +538,37 @@ def get_sales_orders(odoo, account_id, invoices=None):
     return _fetch_orders_by_ids(odoo, 'sale.order', order_ids)
 
 
+def _search_lines_by_analytic(odoo, model, account_id, fields):
+    """Fetch `model` lines tagged to an analytic account.
+
+    Primary: `distribution_analytic_account_ids` Many2many — the canonical
+    searchable field added by Odoo 17's analytic_mixin. Every line model
+    (purchase.order.line, account.move.line, sale.order.line) inherits it.
+
+    Fallback: `analytic_distribution` ilike — kept for installs that don't
+    expose the Many2many (older 17 backports, custom strippings).
+    """
+    try:
+        return odoo.search_read(
+            model,
+            [('distribution_analytic_account_ids', 'in', [account_id])],
+            fields=fields,
+            limit=2000,
+        )
+    except Exception as exc:
+        logger.warning(
+            '%s search via distribution_analytic_account_ids failed for '
+            'account_id=%s, falling back to analytic_distribution ilike: %s',
+            model, account_id, exc,
+        )
+        return odoo.search_read(
+            model,
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=fields,
+            limit=2000,
+        )
+
+
 def _po_lines_for_analytic(odoo, account_id):
     """Open PO lines tagged to this analytic account, with attribution.
 
@@ -556,14 +585,11 @@ def _po_lines_for_analytic(odoo, account_id):
     `qty_invoiced` is financial exposure (what we still owe the vendor).
     See docs/decisions/odoo-cost-data-layers.md.
     """
-    key = str(account_id)
-    raw_lines = odoo.search_read(
-        'purchase.order.line',
-        [('analytic_distribution', 'ilike', key)],
+    raw_lines = _search_lines_by_analytic(
+        odoo, 'purchase.order.line', account_id,
         fields=['id', 'order_id', 'product_id', 'name',
                 'product_qty', 'qty_invoiced', 'price_unit',
                 'price_subtotal', 'analytic_distribution'],
-        limit=2000,
     )
 
     matched = []
@@ -629,12 +655,9 @@ def _bill_lines_for_analytic(odoo, account_id):
       - is_refund         (True for in_refund moves)
       - move_pk           (the parent move id)
     """
-    key = str(account_id)
-    raw_lines = odoo.search_read(
-        'account.move.line',
-        [('analytic_distribution', 'ilike', key)],
+    raw_lines = _search_lines_by_analytic(
+        odoo, 'account.move.line', account_id,
         fields=['id', 'move_id', 'name', 'price_subtotal', 'analytic_distribution'],
-        limit=2000,
     )
 
     candidates = []
@@ -996,16 +1019,13 @@ def _fetch_bills_for_analytic(odoo, account_id):
 
 def _fetch_invoices_for_analytic(odoo, account_id):
     """Customer invoices/refunds linked to this analytic account."""
-    key = str(account_id)
     move_ids = set()
 
     candidate_moves = set()
     try:
-        move_lines = odoo.search_read(
-            'account.move.line',
-            [('analytic_distribution', 'ilike', key)],
+        move_lines = _search_lines_by_analytic(
+            odoo, 'account.move.line', account_id,
             fields=['move_id', 'analytic_distribution'],
-            limit=2000,
         )
         for ml in move_lines:
             if _distribution_pct(account_id, ml.get('analytic_distribution')) > 0:

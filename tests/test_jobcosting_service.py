@@ -291,6 +291,44 @@ class TestDistributionPct:
         assert _distribution_pct(24, 'not-a-dict') == 0.0
 
 
+class TestSearchDomain:
+    """Verify the canonical Odoo 17 analytic-account search is used."""
+
+    def test_po_line_search_uses_distribution_m2m(self, odoo):
+        odoo.search_read.side_effect = _po_line_search_read(lines=[], orders=[])
+
+        _po_lines_for_analytic(odoo, 1084)
+
+        first_call = odoo.search_read.call_args_list[0]
+        assert first_call[0][0] == 'purchase.order.line'
+        domain = first_call[0][1]
+        assert ('distribution_analytic_account_ids', 'in', [1084]) in domain
+
+    def test_po_line_search_falls_back_to_ilike(self, odoo):
+        calls = []
+        def impl(model, domain, **kw):
+            calls.append((model, domain))
+            if len(calls) == 1 and model == 'purchase.order.line':
+                raise Exception("distribution_analytic_account_ids missing")
+            return []
+        odoo.search_read.side_effect = impl
+
+        _po_lines_for_analytic(odoo, 1084)
+
+        assert ('distribution_analytic_account_ids', 'in', [1084]) in calls[0][1]
+        assert ('analytic_distribution', 'ilike', '1084') in calls[1][1]
+
+    def test_bill_line_search_uses_distribution_m2m(self, odoo):
+        odoo.search_read.side_effect = _bill_line_search_read(lines=[], moves=[])
+
+        _bill_lines_for_analytic(odoo, 1084)
+
+        first_call = odoo.search_read.call_args_list[0]
+        assert first_call[0][0] == 'account.move.line'
+        domain = first_call[0][1]
+        assert ('distribution_analytic_account_ids', 'in', [1084]) in domain
+
+
 class TestPOLinesForAnalytic:
     def test_single_full_attribution(self, odoo):
         odoo.search_read.side_effect = _po_line_search_read(

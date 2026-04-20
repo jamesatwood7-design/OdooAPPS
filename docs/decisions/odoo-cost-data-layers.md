@@ -14,10 +14,17 @@ The Job Detail page aggregates costs against an `account.analytic.account`. Odoo
 
 ## Querying `analytic_distribution`
 
-It is a JSON dict field. Reliable pattern is:
+`analytic_distribution` is a JSON dict field on every model that inherits `analytic.mixin` (`purchase.order.line`, `account.move.line`, `sale.order.line`, ...). **Don't filter it directly with `ilike`** — Odoo's JSON column isn't reliably text-searchable on all installs (we hit this: an Odoo 17 Enterprise instance returned zero rows for `[('analytic_distribution', 'ilike', '1084')]` even though many lines referenced account 1084).
 
-- Domain: `[('analytic_distribution', 'ilike', str(account_id))]` — substring match against the serialized JSON.
-- Then in Python: `if str(account_id) in dist:` — guards against false positives where `"24"` matches `"242"` or `"124"`.
+The searchable companion is the computed Many2many `distribution_analytic_account_ids`, which stores the account ids extracted from the JSON. Use that as the domain filter:
+
+```python
+[('distribution_analytic_account_ids', 'in', [account_id])]
+```
+
+Then read the raw `analytic_distribution` dict to compute attribution. Keep an `ilike` fallback for the rare install without the Many2many.
+
+**Dict-key verification** still matters for attribution. Odoo 17 keys look like `"24"` or (with Analytic Plans enabled) `"24,42"` — a comma-separated compound key when one line is tagged across plans. Split each key on comma and match any part. This rejects `"242"`/`"124"` false positives while accepting compound keys.
 
 The percentage matters for cost attribution. A line split 60/40 across two jobs contributes 60% of its value to the first job:
 
