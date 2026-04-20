@@ -233,16 +233,30 @@
                     <div class="d-flex justify-content-between mb-1">
                         <small class="text-muted">Costs vs Contract Value</small>
                         <small class="fw-bold">
-                            ${{ '{:,.0f}'.format(f.total_costs) }} / ${{ '{:,.0f}'.format(f.total_contract) }}
+                            ${{ '{:,.0f}'.format(f.total_costs) }}
+                            {% if f.committed_cost and f.committed_cost > 0 %}
+                                <span class="text-warning">+ ${{ '{:,.0f}'.format(f.committed_cost) }} open</span>
+                            {% endif %}
+                            / ${{ '{:,.0f}'.format(f.total_contract) }}
                         </small>
                     </div>
                     {% set cost_pct = (f.total_costs / f.total_contract * 100) if f.total_contract > 0 else 0 %}
-                    {% if cost_pct > 100 %}{% set cost_pct_display = 100 %}{% else %}{% set cost_pct_display = cost_pct %}{% endif %}
-                    <div class="progress" style="height: 24px;">
-                        <div class="progress-bar {% if cost_pct > 90 %}bg-danger{% elif cost_pct > 70 %}bg-warning{% else %}bg-info{% endif %}"
-                             style="width: {{ cost_pct_display }}%">
-                            {{ '{:.0f}'.format(cost_pct) }}% Spent
+                    {% set committed_pct = (f.committed_cost / f.total_contract * 100) if f.total_contract > 0 and f.committed_cost else 0 %}
+                    {% set exposure_pct = cost_pct + committed_pct %}
+                    {% set billed_display = cost_pct if cost_pct <= 100 else 100 %}
+                    {% set committed_display = committed_pct if (cost_pct + committed_pct) <= 100 else (100 - billed_display if billed_display < 100 else 0) %}
+                    <div class="progress" style="height: 24px;"
+                         title="Billed ${{ '{:,.0f}'.format(f.total_costs) }} + Committed ${{ '{:,.0f}'.format(f.committed_cost or 0) }}">
+                        <div class="progress-bar {% if exposure_pct > 90 %}bg-danger{% elif exposure_pct > 70 %}bg-warning{% else %}bg-info{% endif %}"
+                             style="width: {{ billed_display }}%">
+                            {{ '{:.0f}'.format(cost_pct) }}% Billed
                         </div>
+                        {% if committed_display > 0 %}
+                        <div class="progress-bar bg-warning bg-opacity-50"
+                             style="width: {{ committed_display }}%">
+                            {{ '{:.0f}'.format(committed_pct) }}% Committed
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 {% endif %}
@@ -287,7 +301,7 @@
 
                 <!-- Quick Stats -->
                 <div class="row g-2 mt-3">
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Labor Hours</small>
@@ -295,7 +309,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Purchase Orders</small>
@@ -303,11 +317,22 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Vendor Bills</small>
                                 <strong>{{ f.bills|length }}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <div class="card border-0 bg-light text-center"
+                             title="Uninvoiced portion of open POs">
+                            <div class="card-body py-2">
+                                <small class="text-muted d-block">Committed</small>
+                                <strong class="{% if f.committed_cost and f.committed_cost > 0 %}text-warning{% endif %}">
+                                    ${{ '{:,.0f}'.format(f.committed_cost or 0) }}
+                                </strong>
                             </div>
                         </div>
                     </div>
@@ -376,16 +401,21 @@
                             <td class="text-end fw-bold">${{ '{:,.2f}'.format(f.total_costs) }}</td>
                         </tr>
 
-                        <!-- PROFIT SECTION -->
+                        <!-- REALIZED PROFIT SECTION -->
                         <tr><td colspan="2" style="border-top: 3px double #000;" class="pt-3"></td></tr>
                         <tr>
-                            <td class="fw-bold fs-5">Gross Profit</td>
+                            <td class="fw-bold fs-5">
+                                Realized Gross Profit
+                                <small class="text-muted d-block fw-normal" style="font-size: 0.8rem;">
+                                    (based on billed costs only)
+                                </small>
+                            </td>
                             <td class="text-end fw-bold fs-5 {% if f.gross_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
                                 ${{ '{:,.2f}'.format(f.gross_profit) }}
                             </td>
                         </tr>
                         <tr>
-                            <td class="fw-bold">Margin %</td>
+                            <td class="fw-bold">Realized Margin %</td>
                             <td class="text-end fw-bold {% if f.margin_pct >= 0 %}text-success{% else %}text-danger{% endif %}">
                                 {{ '{:.1f}'.format(f.margin_pct) }}%
                             </td>
@@ -397,6 +427,36 @@
                                 <small class="text-muted">({% if f.billed_vs_costs >= 0 %}Over{% else %}Under{% endif %}-billed)</small>
                             </td>
                         </tr>
+
+                        <!-- PROJECTION SECTION (includes open POs) -->
+                        {% if f.committed_cost and f.committed_cost > 0 %}
+                        {% set projected_costs = f.total_costs + f.committed_cost %}
+                        {% set projected_gp = f.total_contract - projected_costs %}
+                        {% set projected_margin = (projected_gp / f.total_contract * 100) if f.total_contract > 0 else 0 %}
+                        <tr><td colspan="2" class="fw-bold text-uppercase pt-4 pb-1" style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                            Projection <small class="text-muted text-capitalize fw-normal">(with open POs)</small>
+                        </td></tr>
+                        <tr>
+                            <td class="ps-3 text-warning">Open PO Commitments</td>
+                            <td class="text-end text-warning">${{ '{:,.2f}'.format(f.committed_cost) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="ps-3">Projected Total Costs</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(projected_costs) }}</td>
+                        </tr>
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Projected Gross Profit</td>
+                            <td class="text-end fw-bold {% if projected_gp >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                ${{ '{:,.2f}'.format(projected_gp) }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold ps-3">Projected Margin %</td>
+                            <td class="text-end fw-bold {% if projected_margin >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ '{:.1f}'.format(projected_margin) }}%
+                            </td>
+                        </tr>
+                        {% endif %}
 
                         <!-- PER SQ FT -->
                         {% if f.sq_ft > 0 %}
