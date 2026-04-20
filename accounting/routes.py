@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-from flask import render_template, request, flash, redirect, url_for, current_app, jsonify
+from flask import render_template, request, flash, redirect, url_for, current_app, jsonify, session
 from accounting import bp
 from accounting import services
 from accounting import transactions
@@ -405,8 +405,11 @@ def view_move(move_id):
         flash(f'Error: {e}', 'danger')
         return redirect(url_for('accounting.trial_balance'))
 
+    from auth.db import has_permission
+    can_write = has_permission(session.get('permissions', {}),
+                               'accounting', 'write')
     return render_template('accounting/view_move.html', move=move,
-                           attachments=attachments)
+                           attachments=attachments, can_write=can_write)
 
 
 @bp.route('/move/<int:move_id>/upload', methods=['POST'])
@@ -429,6 +432,29 @@ def upload_attachment(move_id):
     except Exception as e:
         flash(f'Upload error: {e}', 'danger')
 
+    return redirect(url_for('accounting.view_move', move_id=move_id))
+
+
+@bp.route('/move/<int:move_id>/attachment/<int:attachment_id>/delete',
+          methods=['POST'])
+@permission_required('accounting', 'write')
+def delete_move_attachment(move_id, attachment_id):
+    """Delete an attachment on a specific move.
+
+    Deleting the "main" (cached) PDF here is the documented workaround
+    for Odoo caching the rendered invoice: the next Send & Print triggers
+    a fresh render from the current invoice data.
+    """
+    odoo = current_app.odoo
+    try:
+        ok = transactions.delete_attachment(odoo, attachment_id, move_id)
+        if ok:
+            flash('Attachment deleted. Odoo will regenerate the PDF the '
+                  'next time you send the invoice.', 'success')
+        else:
+            flash('Attachment not found for this document.', 'warning')
+    except Exception as e:
+        flash(f'Delete failed: {e}', 'danger')
     return redirect(url_for('accounting.view_move', move_id=move_id))
 
 

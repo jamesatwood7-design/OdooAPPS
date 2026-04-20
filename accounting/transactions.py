@@ -359,7 +359,10 @@ def get_moves_list(odoo, move_type, domain=None, order=None,
 
 
 def get_move_attachments(odoo, move_id):
-    """Get all attachments for a transaction."""
+    """Return ir.attachment records for a move, annotated with display helpers
+    and a ``is_main`` flag that identifies the PDF Odoo will send to the
+    customer (account.move.message_main_attachment_id).
+    """
     attachments = odoo.search_read(
         'ir.attachment',
         [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
@@ -367,6 +370,19 @@ def get_move_attachments(odoo, move_id):
                 'datas'],
         order='create_date desc',
     )
+
+    main_id = None
+    try:
+        rows = odoo.search_read(
+            'account.move', [('id', '=', move_id)],
+            fields=['message_main_attachment_id'],
+        )
+        if rows:
+            main = rows[0].get('message_main_attachment_id')
+            if isinstance(main, (list, tuple)) and main:
+                main_id = main[0]
+    except Exception:
+        pass
 
     for a in attachments:
         size = a.get('file_size', 0) or 0
@@ -379,8 +395,29 @@ def get_move_attachments(odoo, move_id):
 
         a['is_pdf'] = 'pdf' in (a.get('mimetype') or '').lower()
         a['is_image'] = (a.get('mimetype') or '').startswith('image/')
+        a['is_main'] = a['id'] == main_id
 
     return attachments
+
+
+def delete_attachment(odoo, attachment_id, move_id):
+    """Delete an ir.attachment, verifying it belongs to the given move.
+
+    Returning whether deletion succeeded. We read first to make sure the
+    attachment really is scoped to account.move.<move_id> so the route
+    can't be abused to delete arbitrary attachments by id.
+    """
+    records = odoo.search_read(
+        'ir.attachment',
+        [('id', '=', attachment_id),
+         ('res_model', '=', 'account.move'),
+         ('res_id', '=', move_id)],
+        fields=['id'],
+    )
+    if not records:
+        return False
+    odoo.unlink('ir.attachment', [attachment_id])
+    return True
 
 
 def upload_attachment(odoo, move_id, filename, file_data_base64, mimetype='application/octet-stream'):
