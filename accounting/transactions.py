@@ -152,21 +152,47 @@ def _build_move_lines(lines, analytic_id=None):
     return invoice_lines
 
 
+SUBJECT_HEADER = 'Subject:\n'
+TERMS_HEADER = 'Terms & Conditions:\n'
+
+
 def _compose_narration(subject='', customer_notes='', terms=''):
-    """Merge the three free-text fields into the single Odoo narration field,
-    with section headers when multiple parts are present.
+    """Merge the three free-text fields into the single Odoo narration field.
+
+    Uses explicit section headers so parse_narration() can reverse the
+    operation when pre-filling the edit form.
     """
     parts = []
     subject = (subject or '').strip()
     customer_notes = (customer_notes or '').strip()
     terms = (terms or '').strip()
     if subject:
-        parts.append(subject)
+        parts.append(SUBJECT_HEADER + subject)
     if customer_notes:
         parts.append(customer_notes)
     if terms:
-        parts.append('Terms & Conditions:\n' + terms)
+        parts.append(TERMS_HEADER + terms)
     return '\n\n'.join(parts)
+
+
+def parse_narration(narration):
+    """Split a narration string produced by _compose_narration() back into
+    (subject, customer_notes, terms). Unknown chunks all collapse into
+    customer_notes so we don't lose anything the operator typed.
+    """
+    subject = ''
+    customer_notes_parts = []
+    terms = ''
+    if not narration:
+        return subject, '', terms
+    for chunk in [c.strip() for c in narration.split('\n\n') if c.strip()]:
+        if chunk.startswith(SUBJECT_HEADER):
+            subject = chunk[len(SUBJECT_HEADER):].strip()
+        elif chunk.startswith(TERMS_HEADER):
+            terms = chunk[len(TERMS_HEADER):].strip()
+        else:
+            customer_notes_parts.append(chunk)
+    return subject, '\n\n'.join(customer_notes_parts), terms
 
 
 def _create_move(odoo, move_type, partner_id, invoice_date, lines,
@@ -530,23 +556,74 @@ def post_move(odoo, move_id):
     return odoo.execute_kw('account.move', 'action_post', [[move_id]])
 
 
+def reset_move_to_draft(odoo, move_id):
+    """Reset a posted move back to draft so it can be edited."""
+    return odoo.execute_kw('account.move', 'button_draft', [[move_id]])
+
+
 def get_move(odoo, move_id):
-    """Get a single account.move with its lines."""
+    """Fetch a single account.move with enriched header + line data.
+
+    Returns a dict with:
+      - Header: name, move_type, partner_id/partner_name, date, invoice_date,
+        invoice_date_due, invoice_payment_term_id, user_id, ref,
+        invoice_origin, amount_total, amount_untaxed, amount_tax,
+        amount_residual, state, payment_state, narration.
+      - `invoice_lines`: the product/service lines shown on the printed
+        invoice (subset of move.line_ids where display_type is not a
+        section/header and excluding tax/receivable lines).
+      - `journal_lines`: every account.move.line — the accounting view.
+    """
     moves = odoo.safe_search_read(
         'account.move',
         [('id', '=', move_id)],
         fields=['id', 'name', 'move_type', 'partner_id', 'date',
-                'invoice_date', 'amount_total', 'amount_residual',
-                'state', 'payment_state', 'ref'],
+                'invoice_date', 'invoice_date_due',
+                'invoice_payment_term_id', 'user_id',
+                'amount_total', 'amount_untaxed', 'amount_tax',
+                'amount_residual', 'state', 'payment_state',
+                'ref', 'invoice_origin', 'narration',
+                'invoice_line_ids'],
     )
     if not moves:
         return None
 
     move = moves[0]
     move['partner_name'] = format_many2one(move.get('partner_id'))
+    move['payment_term_name'] = format_many2one(move.get('invoice_payment_term_id'))
+    move['salesperson_name'] = format_many2one(move.get('user_id'))
 
-    # Get lines
-    move['lines'] = odoo.safe_search_read(
+    # Invoice-style lines: exclude tax lines, receivable/payable lines, and
+    # section/note display lines.
+    invoice_lines = []
+    line_ids = move.get('invoice_line_ids') or []
+    if line_ids:
+        invoice_lines = odoo.safe_search_read(
+            'account.move.line',
+            [('id', 'in', line_ids)],
+            fields=['id', 'name', 'product_id', 'quantity', 'price_unit',
+                    'discount', 'tax_ids', 'price_subtotal', 'price_total',
+                    'account_id', 'analytic_distribution', 'display_type'],
+            order='sequence asc, id asc',
+        )
+        for line in invoice_lines:
+            line['product_name'] = format_many2one(line.get('product_id'))
+            line['account_name'] = format_many2one(line.get('account_id'))
+            line['tax_label'] = ''
+            if line.get('tax_ids'):
+                try:
+                    taxes = odoo.safe_search_read(
+                        'account.tax',
+                        [('id', 'in', line['tax_ids'])],
+                        fields=['name'],
+                    )
+                    line['tax_label'] = ', '.join(t['name'] for t in taxes)
+                except Exception:
+                    pass
+    move['invoice_lines'] = invoice_lines
+
+    # Full accounting detail for the collapsible Journal Items view.
+    move['journal_lines'] = odoo.safe_search_read(
         'account.move.line',
         [('move_id', '=', move_id)],
         fields=['id', 'name', 'account_id', 'debit', 'credit',
@@ -555,6 +632,43 @@ def get_move(odoo, move_id):
     )
 
     return move
+
+
+def update_move(odoo, move_id, partner_id, invoice_date, lines, **kwargs):
+    """Update an existing draft move. Replaces invoice_line_ids wholesale.
+
+    Same keyword set as create_invoice / create_bill (name, ref, analytic_id,
+    payment_term_id, date_due, user_id, subject, customer_notes, terms).
+    Odoo's action_post refuses to edit non-draft moves, so callers should
+    ensure state=='draft' before calling.
+    """
+    subject = kwargs.get('subject', '')
+    customer_notes = kwargs.get('customer_notes', '')
+    terms = kwargs.get('terms', '')
+    narration = _compose_narration(subject, customer_notes, terms)
+
+    line_commands = [(5, 0, 0)] + _build_move_lines(
+        lines, kwargs.get('analytic_id'),
+    )
+
+    vals = {
+        'partner_id': partner_id,
+        'invoice_date': invoice_date,
+        'ref': kwargs.get('ref') or '',
+        'invoice_line_ids': line_commands,
+    }
+    if kwargs.get('name') is not None:
+        vals['name'] = kwargs['name']
+    if kwargs.get('payment_term_id'):
+        vals['invoice_payment_term_id'] = kwargs['payment_term_id']
+    if kwargs.get('date_due'):
+        vals['invoice_date_due'] = kwargs['date_due']
+    if kwargs.get('user_id'):
+        vals['user_id'] = kwargs['user_id']
+    if narration:
+        vals['narration'] = narration
+
+    return odoo.write('account.move', [move_id], vals)
 
 
 # ---------------------------------------------------------------------------
