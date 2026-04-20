@@ -589,6 +589,48 @@ body {
     padding: 10px 12px;
 }
 
+/* Sortable column header */
+.sortable-th {
+    user-select: none;
+}
+
+.sortable-th a:hover {
+    color: #0f172a !important;
+}
+
+.sortable-th .sort-icon {
+    font-size: 0.75rem;
+    opacity: 0.75;
+}
+
+/* Pagination footer */
+.list-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 4px;
+    margin-top: 8px;
+}
+
+.list-pagination .pagination {
+    flex-wrap: wrap;
+}
+
+/* Totals row in tfoot */
+.list-card .table tfoot tr.totals-row td {
+    background: #f1f5f9;
+    font-weight: 600;
+    border-top: 2px solid #cbd5e1;
+}
+
+/* Filters bar adjustments */
+.list-filters .filter-item.filter-search {
+    flex: 1 1 260px;
+    max-width: 360px;
+}
+
 /* Empty state */
 .empty-state {
     text-align: center;

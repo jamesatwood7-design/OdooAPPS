@@ -1,77 +1,35 @@
 {% extends "base.html" %}
-{% from "_macros.html" import empty_state %}
+{% from "_macros.html" import empty_state, list_filter_form, sortable_th, paginator %}
 
 {% block title %}Analytic Entries - Job Costing{% endblock %}
 
 {% block content %}
-<form method="GET" class="list-filters">
-    <div class="filter-item">
-        <span class="filter-label">Project</span>
-        <select name="project_id" class="form-select">
-            <option value="">All Projects</option>
-            {% for proj in projects %}
-                <option value="{{ proj.id }}"
-                    {% if proj.id == selected_project_id %}selected{% endif %}>
-                    {{ proj.name }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">Account</span>
-        <select name="account_id" class="form-select">
-            <option value="">All Accounts</option>
-            {% for acct in accounts %}
-                <option value="{{ acct.id }}"
-                    {% if acct.id == selected_account_id %}selected{% endif %}>
-                    {{ acct.name }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">From</span>
-        <input type="date" name="date_from" class="form-control"
-               value="{{ date_from.isoformat() if date_from else '' }}">
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">To</span>
-        <input type="date" name="date_to" class="form-control"
-               value="{{ date_to.isoformat() if date_to else '' }}">
-    </div>
-    <div class="filter-actions">
-        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
-        <a href="?" class="btn btn-sm btn-outline-secondary">Reset</a>
-    </div>
-</form>
-
 <div class="list-toolbar">
-    <label class="list-search">
-        <i class="bi bi-search"></i>
-        <input type="text" placeholder="Search entries…"
-               data-list-filter="#entryTable" data-list-counter="#entryCount">
-    </label>
+    <span class="list-meta">
+        <strong>{{ totals.count }}</strong> entr{{ 'y' if totals.count == 1 else 'ies' }} match the current filters
+    </span>
     <div class="toolbar-group">
-        <span class="list-meta"><strong id="entryCount">{{ lines|length }}</strong> of {{ lines|length }}</span>
         <a href="{{ url_for('jobcosting.create_entry') }}" class="btn btn-sm btn-primary">
             <i class="bi bi-plus-lg"></i> New Entry
         </a>
     </div>
 </div>
 
+{{ list_filter_form(facets=facets, active=query.filters, sort=query.sort) }}
+
 {% if lines %}
 <div class="list-card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0" id="entryTable">
+        <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Date</th>
-                    <th>Description</th>
-                    <th>Project</th>
+                    {{ sortable_th('Date', 'date', query.sort) }}
+                    {{ sortable_th('Description', 'name', query.sort) }}
+                    {{ sortable_th('Project', 'project', query.sort) }}
                     <th>Task</th>
-                    <th>Employee</th>
-                    <th class="text-end">Hours</th>
-                    <th class="text-end">Amount</th>
+                    {{ sortable_th('Employee', 'employee', query.sort) }}
+                    {{ sortable_th('Hours', 'hours', query.sort, classes='text-end') }}
+                    {{ sortable_th('Amount', 'amount', query.sort, classes='text-end') }}
                 </tr>
             </thead>
             <tbody>
@@ -95,15 +53,24 @@
                         {% else %}<span class="text-muted">—</span>{% endif %}
                     </td>
                     <td class="text-end">{{ line.unit_amount_fmt }}</td>
-                    <td class="text-end">${{ '%.2f'|format(line.amount|abs) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(line.amount|abs) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td colspan="5">Totals across <strong>{{ totals.count }}</strong> filtered entr{{ 'y' if totals.count == 1 else 'ies' }}</td>
+                    <td class="text-end">{{ '{:,.2f}'.format(totals.sums.unit_amount or 0) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format((totals.sums.amount or 0)|abs) }}</td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>
+
+{{ paginator(query.page, query.page_size, totals.count) }}
 {% else %}
 {{ empty_state('inbox', 'No entries match these filters',
-    'Try widening the date range or clearing project and account filters.') }}
+    'Try widening the date range or clearing the account filter.') }}
 {% endif %}
 {% endblock %}

@@ -21,39 +21,62 @@ def dashboard():
 # Analytic Entries (still useful for viewing/creating line items)
 # ---------------------------------------------------------------------------
 
+from common.list_query import (
+    parse_list_query, search_facet, m2o_facet, date_range_facet,
+)
+from common.list_totals import compute_list_totals
+
+
+ENTRIES_SORT_MAP = {
+    'date': 'date',
+    'amount': 'amount',
+    'hours': 'unit_amount',
+    'name': 'name',
+    'project': 'project_id',
+    'employee': 'employee_id',
+}
+
+
 @bp.route('/entries')
 @odoo_user_required
 def entries():
-    """Browse analytic items with filters."""
+    """Paginated analytic-items list with multi-facet filtering + totals."""
     odoo = current_app.odoo
 
-    account_id = request.args.get('account_id', type=int)
-    date_from_str = request.args.get('date_from', '')
-    date_to_str = request.args.get('date_to', '')
-
-    date_from = None
-    date_to = None
-    if date_from_str:
-        try:
-            date_from = date.fromisoformat(date_from_str)
-        except ValueError:
-            pass
-    if date_to_str:
-        try:
-            date_to = date.fromisoformat(date_to_str)
-        except ValueError:
-            pass
-
-    lines = []
     account_list = []
-
     try:
         account_list = services.get_analytic_accounts(odoo)
-        lines = services.get_analytic_lines(
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+
+    account_options = [(a['id'], a['name']) for a in account_list]
+
+    facets = [
+        search_facet('q', ['name'], placeholder='Search description…'),
+        m2o_facet('account_id', 'account_id', options=account_options, label='Account'),
+        date_range_facet('date_from', 'date_to', 'date'),
+    ]
+
+    query = parse_list_query(
+        request.args, facets, ENTRIES_SORT_MAP,
+        default_sort='date_desc',
+    )
+
+    lines = []
+    totals = {'count': 0, 'sums': {'amount': 0.0, 'unit_amount': 0.0}}
+    try:
+        lines, full_domain = services.get_analytic_lines_paginated(
             odoo,
-            account_id=account_id,
-            date_from=date_from,
-            date_to=date_to,
+            domain=query['domain'],
+            order=query['order'],
+            offset=query['offset'],
+            limit=query['limit'],
+        )
+        totals = compute_list_totals(
+            odoo, 'account.analytic.line', full_domain,
+            sum_fields=['amount', 'unit_amount'],
         )
     except OdooConnectionError as e:
         flash(f'Cannot connect to Odoo: {e}', 'danger')
@@ -63,12 +86,10 @@ def entries():
     return render_template(
         'jobcosting/entries.html',
         lines=lines,
-        projects=[],
+        facets=facets,
+        query=query,
+        totals=totals,
         accounts=account_list,
-        selected_project_id=None,
-        selected_account_id=account_id,
-        date_from=date_from,
-        date_to=date_to,
     )
 
 

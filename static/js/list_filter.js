@@ -1,47 +1,48 @@
+/**
+ * List-view filter helpers.
+ *
+ * The Python side (common/list_query.py) reads filter state from the URL,
+ * so the JS only needs to keep the URL in sync with the form controls.
+ * Every control flagged with `data-list-autosubmit` triggers a form
+ * submit — debounced on text inputs so typing doesn't thrash.
+ */
 (function () {
     'use strict';
 
-    function wire(input) {
-        var tableSel = input.dataset.listFilter;
-        var counterSel = input.dataset.listCounter;
-        var chipsSel = input.dataset.listChips;
+    var TEXT_INPUT_DEBOUNCE_MS = 300;
 
-        var table = tableSel ? document.querySelector(tableSel) : null;
-        if (!table) return;
-
-        var counter = counterSel ? document.querySelector(counterSel) : null;
-        var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
-        var currentStatus = 'all';
-
-        function apply() {
-            var q = input.value.toLowerCase().trim();
-            var n = 0;
-            for (var i = 0; i < rows.length; i++) {
-                var row = rows[i];
-                var statusOk = currentStatus === 'all' ||
-                    (row.dataset.status || '') === currentStatus;
-                var textOk = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
-                var visible = statusOk && textOk;
-                row.style.display = visible ? '' : 'none';
-                if (visible) n++;
-            }
-            if (counter) counter.textContent = n;
-        }
-
-        input.addEventListener('input', apply);
-
-        if (chipsSel) {
-            var chips = document.querySelectorAll(chipsSel + ' .filter-chip');
-            chips.forEach(function (chip) {
-                chip.addEventListener('click', function () {
-                    currentStatus = this.dataset.status || 'all';
-                    chips.forEach(function (c) { c.classList.remove('active'); });
-                    this.classList.add('active');
-                    apply();
-                });
+    function wire(form) {
+        var debounceTimer = null;
+        var controls = form.querySelectorAll('[data-list-autosubmit]');
+        controls.forEach(function (el) {
+            var isText = el.tagName === 'INPUT' &&
+                (el.type === 'text' || el.type === 'search');
+            var eventName = isText ? 'input' : 'change';
+            el.addEventListener(eventName, function () {
+                resetPage(form);
+                if (isText) {
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(function () {
+                        form.submit();
+                    }, TEXT_INPUT_DEBOUNCE_MS);
+                } else {
+                    form.submit();
+                }
             });
-        }
+        });
     }
 
-    document.querySelectorAll('[data-list-filter]').forEach(wire);
+    /** Any filter change resets to page 1. */
+    function resetPage(form) {
+        var pageInput = form.querySelector('input[name="page"]');
+        if (!pageInput) {
+            pageInput = document.createElement('input');
+            pageInput.type = 'hidden';
+            pageInput.name = 'page';
+            form.appendChild(pageInput);
+        }
+        pageInput.value = '1';
+    }
+
+    document.querySelectorAll('form[data-list-filter]').forEach(wire);
 })();

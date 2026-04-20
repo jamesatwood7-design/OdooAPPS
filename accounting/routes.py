@@ -127,60 +127,90 @@ def cash_flow():
 # Transaction List
 # ---------------------------------------------------------------------------
 
-@bp.route('/invoices')
-@permission_required('accounting', 'read')
-def invoice_list():
-    odoo = current_app.odoo
-    state = request.args.get('state', '')
-    payment_state = request.args.get('payment_state', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+from common.list_query import (
+    parse_list_query, search_facet, select_facet, date_range_facet,
+)
+from common.list_totals import compute_list_totals
 
+
+def _move_facets(partner_label):
+    return [
+        search_facet(
+            'q', ['name', 'partner_id.name', 'ref', 'invoice_origin'],
+            placeholder=f'Search number, {partner_label.lower()}, source…',
+        ),
+        select_facet('state', 'state', [
+            ('draft', 'Draft'),
+            ('posted', 'Posted'),
+            ('cancel', 'Cancelled'),
+        ], label='Status'),
+        select_facet('payment_state', 'payment_state', [
+            ('not_paid', 'Unpaid'),
+            ('partial', 'Partial'),
+            ('paid', 'Paid'),
+            ('in_payment', 'In Payment'),
+        ], label='Payment'),
+        date_range_facet('date_from', 'date_to', 'invoice_date'),
+    ]
+
+
+MOVE_SORT_MAP = {
+    'date': 'invoice_date',
+    'name': 'name',
+    'partner': 'partner_id',
+    'amount': 'amount_total',
+    'residual': 'amount_residual',
+    'state': 'state',
+    'payment': 'payment_state',
+}
+
+
+def _render_move_list(move_type, title, partner_label):
+    odoo = current_app.odoo
+    facets = _move_facets(partner_label)
+    query = parse_list_query(
+        request.args, facets, MOVE_SORT_MAP,
+        default_sort='date_desc',
+    )
     moves = []
+    totals = {'count': 0, 'sums': {'amount_total': 0.0, 'amount_residual': 0.0}}
     try:
-        moves = transactions.get_moves(
-            odoo, move_type='invoices',
-            state=state or None,
-            payment_state=payment_state or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
+        moves, full_domain = transactions.get_moves_list(
+            odoo, move_type,
+            domain=query['domain'],
+            order=query['order'],
+            offset=query['offset'],
+            limit=query['limit'],
+        )
+        totals = compute_list_totals(
+            odoo, 'account.move', full_domain,
+            sum_fields=['amount_total', 'amount_residual'],
         )
     except Exception as e:
         flash(f'Error: {e}', 'danger')
 
-    return render_template('accounting/move_list.html',
-                           moves=moves, title='Customer Invoices',
-                           list_type='invoices',
-                           state=state, payment_state=payment_state,
-                           date_from=date_from, date_to=date_to)
+    return render_template(
+        'accounting/move_list.html',
+        moves=moves,
+        title=title,
+        list_type=move_type,
+        partner_label=partner_label,
+        facets=facets,
+        query=query,
+        totals=totals,
+    )
+
+
+@bp.route('/invoices')
+@permission_required('accounting', 'read')
+def invoice_list():
+    return _render_move_list('invoices', 'Customer Invoices', 'Customer')
 
 
 @bp.route('/bills')
 @permission_required('accounting', 'read')
 def bill_list():
-    odoo = current_app.odoo
-    state = request.args.get('state', '')
-    payment_state = request.args.get('payment_state', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-
-    moves = []
-    try:
-        moves = transactions.get_moves(
-            odoo, move_type='bills',
-            state=state or None,
-            payment_state=payment_state or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
-        )
-    except Exception as e:
-        flash(f'Error: {e}', 'danger')
-
-    return render_template('accounting/move_list.html',
-                           moves=moves, title='Vendor Bills',
-                           list_type='bills',
-                           state=state, payment_state=payment_state,
-                           date_from=date_from, date_to=date_to)
+    return _render_move_list('bills', 'Vendor Bills', 'Vendor')
 
 
 # ---------------------------------------------------------------------------

@@ -86,7 +86,11 @@ def get_tasks_for_project(odoo, project_id):
 
 def get_analytic_lines(odoo, account_id=None, project_id=None,
                        date_from=None, date_to=None, limit=100):
-    """Get analytic items with filters."""
+    """Backwards-compatible single-call fetch of analytic items.
+
+    Kept for tests and callers that don't need pagination. The Entries
+    list page uses get_analytic_lines_paginated() instead.
+    """
     domain = []
     if account_id:
         domain.append(('account_id', '=', account_id))
@@ -106,12 +110,34 @@ def get_analytic_lines(odoo, account_id=None, project_id=None,
         order='date desc',
         limit=limit,
     )
-
     for rec in records:
         rec['unit_amount_fmt'] = format_duration(rec.get('unit_amount'))
         rec['date_obj'] = odoo_to_date(rec.get('date'))
-
     return records
+
+
+def get_analytic_lines_paginated(odoo, domain=None, order=None,
+                                 offset=0, limit=50):
+    """Paginated analytic items for the Entries list page.
+
+    Returns (records, domain_used). The caller feeds domain_used to
+    compute_list_totals() for the footer totals.
+    """
+    full_domain = list(domain or [])
+    records = odoo.safe_search_read(
+        'account.analytic.line', full_domain,
+        fields=[
+            'id', 'name', 'date', 'amount', 'unit_amount',
+            'employee_id', 'project_id', 'task_id', 'account_id',
+        ],
+        order=order or 'date desc',
+        offset=offset,
+        limit=limit,
+    )
+    for rec in records:
+        rec['unit_amount_fmt'] = format_duration(rec.get('unit_amount'))
+        rec['date_obj'] = odoo_to_date(rec.get('date'))
+    return records, full_domain
 
 
 def get_employees(odoo):

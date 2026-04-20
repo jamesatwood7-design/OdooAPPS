@@ -292,18 +292,24 @@ def create_journal_entry(odoo, journal_id, entry_date, lines, ref=None):
     return odoo.create('account.move', vals)
 
 
+def _move_type_domain(move_type):
+    if move_type == 'invoices':
+        return [('move_type', 'in', ('out_invoice', 'out_refund'))]
+    if move_type == 'bills':
+        return [('move_type', 'in', ('in_invoice', 'in_refund'))]
+    if move_type:
+        return [('move_type', '=', move_type)]
+    return []
+
+
 def get_moves(odoo, move_type=None, state=None, payment_state=None,
               partner_id=None, date_from=None, date_to=None, limit=200):
-    """Get account.move records with filters."""
-    domain = []
+    """Backwards-compatible wrapper around the older single-call signature.
 
-    if move_type == 'invoices':
-        domain.append(('move_type', 'in', ('out_invoice', 'out_refund')))
-    elif move_type == 'bills':
-        domain.append(('move_type', 'in', ('in_invoice', 'in_refund')))
-    elif move_type:
-        domain.append(('move_type', '=', move_type))
-
+    Kept for tests / callers that don't need pagination. New list routes
+    use get_moves_list() plus common.list_query.parse_list_query().
+    """
+    domain = _move_type_domain(move_type)
     if state:
         domain.append(('state', '=', state))
     if payment_state:
@@ -323,12 +329,33 @@ def get_moves(odoo, move_type=None, state=None, payment_state=None,
         order='invoice_date desc, id desc',
         limit=limit,
     )
-
     for m in moves:
         m['partner_name'] = format_many2one(m.get('partner_id'))
         m['display_date'] = m.get('invoice_date') or m.get('date') or ''
-
     return moves
+
+
+def get_moves_list(odoo, move_type, domain=None, order=None,
+                   offset=0, limit=50):
+    """Paginated account.move fetch used by the Invoices / Bills list pages.
+
+    Returns (moves, full_domain). The caller reuses full_domain with
+    compute_list_totals() so the footer reflects the full filtered set.
+    """
+    full_domain = _move_type_domain(move_type) + list(domain or [])
+    moves = odoo.safe_search_read(
+        'account.move', full_domain,
+        fields=['id', 'name', 'move_type', 'partner_id', 'invoice_date',
+                'date', 'amount_total', 'amount_residual', 'state',
+                'payment_state', 'ref', 'invoice_origin'],
+        order=order or 'invoice_date desc, id desc',
+        offset=offset,
+        limit=limit,
+    )
+    for m in moves:
+        m['partner_name'] = format_many2one(m.get('partner_id'))
+        m['display_date'] = m.get('invoice_date') or m.get('date') or ''
+    return moves, full_domain
 
 
 def get_move_attachments(odoo, move_id):

@@ -1,16 +1,11 @@
 {% extends "base.html" %}
-{% from "_macros.html" import empty_state %}
+{% from "_macros.html" import empty_state, list_filter_form, sortable_th, paginator %}
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
 <div class="list-toolbar">
-    <label class="list-search">
-        <i class="bi bi-search"></i>
-        <input type="text" placeholder="Search by number, partner, source…"
-               data-list-filter="#moveTable" data-list-counter="#moveCount">
-    </label>
+    <span class="list-meta"><strong>{{ totals.count }}</strong> {{ 'invoice' if list_type == 'invoices' else 'bill' }}{{ 's' if totals.count != 1 else '' }} match the current filters</span>
     <div class="toolbar-group">
-        <span class="list-meta"><strong id="moveCount">{{ moves|length }}</strong> of {{ moves|length }}</span>
         {% if list_type == 'invoices' %}
         <a href="{{ url_for('accounting.create_invoice') }}" class="btn btn-sm btn-primary">
             <i class="bi bi-plus-lg"></i> New Invoice
@@ -23,54 +18,22 @@
     </div>
 </div>
 
-<form method="GET" class="list-filters">
-    <div class="filter-item">
-        <span class="filter-label">Status</span>
-        <select name="state" class="form-select">
-            <option value="">All</option>
-            <option value="draft" {% if state == 'draft' %}selected{% endif %}>Draft</option>
-            <option value="posted" {% if state == 'posted' %}selected{% endif %}>Posted</option>
-            <option value="cancel" {% if state == 'cancel' %}selected{% endif %}>Cancelled</option>
-        </select>
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">Payment</span>
-        <select name="payment_state" class="form-select">
-            <option value="">All</option>
-            <option value="not_paid" {% if payment_state == 'not_paid' %}selected{% endif %}>Unpaid</option>
-            <option value="partial" {% if payment_state == 'partial' %}selected{% endif %}>Partial</option>
-            <option value="paid" {% if payment_state == 'paid' %}selected{% endif %}>Paid</option>
-            <option value="in_payment" {% if payment_state == 'in_payment' %}selected{% endif %}>In Payment</option>
-        </select>
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">From</span>
-        <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
-    </div>
-    <div class="filter-item">
-        <span class="filter-label">To</span>
-        <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
-    </div>
-    <div class="filter-actions">
-        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
-        <a href="?" class="btn btn-sm btn-outline-secondary">Reset</a>
-    </div>
-</form>
+{{ list_filter_form(facets=facets, active=query.filters, sort=query.sort) }}
 
 {% if moves %}
 <div class="list-card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0" id="moveTable">
+        <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Number</th>
-                    <th>{% if list_type == 'invoices' %}Customer{% else %}Vendor{% endif %}</th>
-                    <th>Date</th>
+                    {{ sortable_th('Number', 'name', query.sort) }}
+                    {{ sortable_th(partner_label, 'partner', query.sort) }}
+                    {{ sortable_th('Date', 'date', query.sort) }}
                     <th>Source</th>
-                    <th class="text-end">Total</th>
-                    <th class="text-end">Due</th>
-                    <th>Status</th>
-                    <th>Payment</th>
+                    {{ sortable_th('Total', 'amount', query.sort, classes='text-end') }}
+                    {{ sortable_th('Due', 'residual', query.sort, classes='text-end') }}
+                    {{ sortable_th('Status', 'state', query.sort) }}
+                    {{ sortable_th('Payment', 'payment', query.sort) }}
                 </tr>
             </thead>
             <tbody>
@@ -108,9 +71,19 @@
                 </tr>
                 {% endfor %}
             </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td colspan="4">Totals across <strong>{{ totals.count }}</strong> filtered record{{ 's' if totals.count != 1 else '' }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(totals.sums.amount_total or 0) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(totals.sums.amount_residual or 0) }}</td>
+                    <td colspan="2"></td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>
+
+{{ paginator(query.page, query.page_size, totals.count) }}
 {% else %}
 {{ empty_state('inbox',
     'No ' + ('invoices' if list_type == 'invoices' else 'bills') + ' found',

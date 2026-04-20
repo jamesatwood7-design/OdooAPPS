@@ -5,3 +5,117 @@
     {% if body %}<p>{{ body }}</p>{% endif %}
 </div>
 {%- endmacro %}
+
+
+{# ------------------------------------------------------------------ #}
+{# Reusable list-view controls: filter form, sortable header,         #}
+{# pagination. Paired with common/list_query.py on the Python side.   #}
+{# ------------------------------------------------------------------ #}
+
+{% macro list_filter_form(facets=[], active={}, sort='') -%}
+<form method="GET" class="list-filters" data-list-filter>
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% for facet in facets %}
+        {% if facet.kind == 'search' %}
+            <div class="filter-item filter-search">
+                <span class="filter-label">{{ facet.label }}</span>
+                <input type="text" name="{{ facet.param }}" class="form-control"
+                       placeholder="{{ facet.placeholder }}"
+                       value="{{ active.get(facet.param, '') }}"
+                       data-list-autosubmit>
+            </div>
+        {% elif facet.kind == 'select' or (facet.kind == 'm2o' and facet.options) %}
+            <div class="filter-item">
+                <span class="filter-label">{{ facet.label }}</span>
+                <select name="{{ facet.param }}" class="form-select" data-list-autosubmit>
+                    <option value="">All</option>
+                    {% for value, label in facet.options %}
+                    <option value="{{ value }}"
+                        {% if active.get(facet.param)|string == value|string %}selected{% endif %}>
+                        {{ label }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        {% elif facet.kind == 'date_range' %}
+            <div class="filter-item">
+                <span class="filter-label">{{ facet.label_from }}</span>
+                <input type="date" name="{{ facet.param_from }}" class="form-control"
+                       value="{{ active.get(facet.param_from, '') }}"
+                       data-list-autosubmit>
+            </div>
+            <div class="filter-item">
+                <span class="filter-label">{{ facet.label_to }}</span>
+                <input type="date" name="{{ facet.param_to }}" class="form-control"
+                       value="{{ active.get(facet.param_to, '') }}"
+                       data-list-autosubmit>
+            </div>
+        {% endif %}
+    {% endfor %}
+    <div class="filter-actions">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
+        <a href="{{ request.path }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+    </div>
+</form>
+{%- endmacro %}
+
+
+{% macro sortable_th(label, sort_key, current_sort='', classes='') -%}
+    {%- set next_dir = 'asc' if current_sort == sort_key ~ '_desc' else ('desc' if current_sort == sort_key ~ '_asc' else 'asc') -%}
+    {%- set icon = 'bi-arrow-up' if current_sort == sort_key ~ '_asc' else ('bi-arrow-down' if current_sort == sort_key ~ '_desc' else 'bi-arrow-down-up') -%}
+    <th class="{{ classes }} sortable-th">
+        <a href="?{{ page_url(request.args, sort=sort_key ~ '_' ~ next_dir, page=1) }}"
+           class="text-reset text-decoration-none d-inline-flex align-items-center gap-1">
+            <span>{{ label }}</span>
+            <i class="bi {{ icon }} sort-icon {% if current_sort.startswith(sort_key) %}text-primary{% else %}text-muted{% endif %}"></i>
+        </a>
+    </th>
+{%- endmacro %}
+
+
+{% macro paginator(page, page_size, total_count) -%}
+    {%- set total_pages = ((total_count - 1) // page_size + 1) if total_count else 1 -%}
+    {%- set start = ((page - 1) * page_size) + 1 if total_count else 0 -%}
+    {%- set end = start + page_size - 1 -%}
+    {%- if end > total_count %}{% set end = total_count %}{% endif -%}
+    <nav class="list-pagination" aria-label="Pagination">
+        <span class="list-meta">
+            {% if total_count %}
+                Showing <strong>{{ start }}</strong>–<strong>{{ end }}</strong> of <strong>{{ total_count }}</strong>
+            {% else %}
+                <strong>0</strong> results
+            {% endif %}
+        </span>
+        <div class="d-flex align-items-center gap-2">
+            {% if total_pages > 1 %}
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                    <a class="page-link" href="?{{ page_url(request.args, page=page - 1) }}" aria-label="Previous">‹</a>
+                </li>
+                {% set window = 2 %}
+                {% for p in range(1, total_pages + 1) %}
+                    {% if p == 1 or p == total_pages or (p >= page - window and p <= page + window) %}
+                        <li class="page-item {% if p == page %}active{% endif %}">
+                            <a class="page-link" href="?{{ page_url(request.args, page=p) }}">{{ p }}</a>
+                        </li>
+                    {% elif p == page - window - 1 or p == page + window + 1 %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+                    <a class="page-link" href="?{{ page_url(request.args, page=page + 1) }}" aria-label="Next">›</a>
+                </li>
+            </ul>
+            {% endif %}
+            <label class="list-meta mb-0 d-flex align-items-center gap-1">
+                <span>Per page</span>
+                <select class="form-select form-select-sm" style="width: auto;"
+                        onchange="window.location.search='?' + new URLSearchParams({...Object.fromEntries(new URLSearchParams(window.location.search)), page_size: this.value, page: 1}).toString()">
+                    {% for size in [25, 50, 100] %}
+                    <option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+    </nav>
+{%- endmacro %}
