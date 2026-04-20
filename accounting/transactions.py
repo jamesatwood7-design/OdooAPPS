@@ -362,14 +362,36 @@ def get_move_attachments(odoo, move_id):
     """Return ir.attachment records for a move, annotated with display helpers
     and a ``is_main`` flag that identifies the PDF Odoo will send to the
     customer (account.move.message_main_attachment_id).
+
+    Collects from two places, deduped by id:
+      1. Attachments pointing at this move directly
+         (res_model='account.move', res_id=<move_id>).
+      2. Attachments on chatter messages for this move — these can sit
+         under res_model='mail.compose.message' for certain send flows,
+         so they'd be invisible otherwise.
     """
-    attachments = odoo.search_read(
-        'ir.attachment',
-        [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
-        fields=['id', 'name', 'mimetype', 'file_size', 'create_date', 'type',
-                'datas'],
-        order='create_date desc',
-    )
+    attachment_ids = set()
+
+    try:
+        direct_ids = odoo.search(
+            'ir.attachment',
+            [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
+        )
+        attachment_ids.update(direct_ids)
+    except Exception:
+        pass
+
+    try:
+        messages = odoo.search_read(
+            'mail.message',
+            [('model', '=', 'account.move'), ('res_id', '=', move_id)],
+            fields=['attachment_ids'],
+        )
+        for msg in messages:
+            for aid in msg.get('attachment_ids') or []:
+                attachment_ids.add(aid)
+    except Exception:
+        pass
 
     main_id = None
     try:
@@ -381,8 +403,19 @@ def get_move_attachments(odoo, move_id):
             main = rows[0].get('message_main_attachment_id')
             if isinstance(main, (list, tuple)) and main:
                 main_id = main[0]
+                attachment_ids.add(main_id)
     except Exception:
         pass
+
+    if not attachment_ids:
+        return []
+
+    attachments = odoo.search_read(
+        'ir.attachment',
+        [('id', 'in', list(attachment_ids))],
+        fields=['id', 'name', 'mimetype', 'file_size', 'create_date', 'type'],
+        order='create_date desc',
+    )
 
     for a in attachments:
         size = a.get('file_size', 0) or 0
@@ -393,8 +426,10 @@ def get_move_attachments(odoo, move_id):
         else:
             a['size_display'] = f'{size} B'
 
-        a['is_pdf'] = 'pdf' in (a.get('mimetype') or '').lower()
-        a['is_image'] = (a.get('mimetype') or '').startswith('image/')
+        mimetype = (a.get('mimetype') or '').lower()
+        a['is_pdf'] = 'pdf' in mimetype
+        a['is_image'] = mimetype.startswith('image/')
+        a['is_previewable'] = a['is_pdf'] or a['is_image']
         a['is_main'] = a['id'] == main_id
 
     return attachments

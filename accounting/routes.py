@@ -1,5 +1,8 @@
 from datetime import date, timedelta
-from flask import render_template, request, flash, redirect, url_for, current_app, jsonify, session
+from flask import (
+    render_template, request, flash, redirect, url_for, current_app,
+    jsonify, session, make_response,
+)
 from accounting import bp
 from accounting import services
 from accounting import transactions
@@ -461,9 +464,17 @@ def delete_move_attachment(move_id, attachment_id):
 @bp.route('/attachment/<int:attachment_id>')
 @permission_required('accounting', 'read')
 def download_attachment(attachment_id):
-    """Download/view an attachment."""
+    """Serve an ir.attachment inline (preview) or as a forced download.
+
+    ``?download=1`` switches to ``Content-Disposition: attachment`` so the
+    browser saves the file instead of rendering it. Default is inline so
+    PDFs/images open in the browser tab.
+    """
     odoo = current_app.odoo
     import base64
+    from urllib.parse import quote
+
+    force_download = request.args.get('download') in ('1', 'true', 'yes')
 
     try:
         atts = odoo.search_read(
@@ -471,16 +482,24 @@ def download_attachment(attachment_id):
             [('id', '=', attachment_id)],
             fields=['name', 'datas', 'mimetype'],
         )
-        if not atts:
-            flash('Attachment not found.', 'warning')
+        if not atts or not atts[0].get('datas'):
+            flash('Attachment not found or empty.', 'warning')
             return redirect(url_for('accounting.trial_balance'))
 
         att = atts[0]
         data = base64.b64decode(att['datas'])
 
+        disposition = 'attachment' if force_download else 'inline'
+        filename = att['name'] or f'attachment-{attachment_id}'
+        # RFC 5987: quote non-ASCII filenames for broad browser support.
+        quoted = quote(filename)
+
         response = make_response(data)
-        response.headers['Content-Type'] = att.get('mimetype', 'application/octet-stream')
-        response.headers['Content-Disposition'] = f'inline; filename="{att["name"]}"'
+        response.headers['Content-Type'] = att.get('mimetype') or 'application/octet-stream'
+        response.headers['Content-Disposition'] = (
+            f"{disposition}; filename=\"{filename}\"; filename*=UTF-8''{quoted}"
+        )
+        response.headers['Content-Length'] = str(len(data))
         return response
     except Exception as e:
         flash(f'Error: {e}', 'danger')

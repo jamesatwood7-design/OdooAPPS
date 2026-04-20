@@ -132,8 +132,7 @@
                     {% for att in attachments %}
                     <div class="list-group-item px-2">
                         <div class="d-flex justify-content-between align-items-start gap-2">
-                            <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
-                               target="_blank" class="text-decoration-none flex-grow-1 text-reset">
+                            <div class="flex-grow-1 min-w-0">
                                 {% if att.is_pdf %}
                                     <i class="bi bi-file-earmark-pdf text-danger"></i>
                                 {% elif att.is_image %}
@@ -141,28 +140,49 @@
                                 {% else %}
                                     <i class="bi bi-file-earmark text-secondary"></i>
                                 {% endif %}
-                                <span class="ms-1">{{ att.name }}</span>
+                                <span class="ms-1 fw-semibold">{{ att.name }}</span>
                                 {% if att.is_main %}
-                                    <span class="badge bg-primary ms-1" title="Odoo will send this PDF to the customer">Main PDF</span>
+                                    <span class="badge bg-primary ms-1" title="Odoo will send this file to the customer">Main PDF</span>
                                 {% endif %}
                                 <br><small class="text-muted">{{ att.size_display }} &middot; {{ att.create_date[:10] if att.create_date else '' }}</small>
-                            </a>
-                            {% if can_write %}
-                            <form method="POST"
-                                  action="{{ url_for('accounting.delete_move_attachment', move_id=move.id, attachment_id=att.id) }}"
-                                  onsubmit="return confirm('{% if att.is_main %}Delete the Main PDF? Odoo will generate a fresh one the next time you send this {{ 'invoice' if move.move_type in ('out_invoice', 'out_refund') else 'bill' }}.{% else %}Delete this attachment?{% endif %}');">
-                                <button type="submit" class="btn btn-sm btn-outline-danger"
-                                        title="Delete attachment">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                            {% endif %}
+                            </div>
+                            <div class="btn-group btn-group-sm flex-shrink-0" role="group">
+                                {% if att.is_previewable %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
+                                   target="_blank" rel="noopener"
+                                   class="btn btn-outline-secondary" title="Preview in new tab">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                {% endif %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id, download=1) }}"
+                                   class="btn btn-outline-primary" title="Download">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                {% if can_write %}
+                                <form method="POST"
+                                      action="{{ url_for('accounting.delete_move_attachment', move_id=move.id, attachment_id=att.id) }}"
+                                      onsubmit="return confirm('{% if att.is_main %}Delete the Main PDF? Odoo will generate a fresh one the next time you send this {{ 'invoice' if move.move_type in ('out_invoice', 'out_refund') else 'bill' }}.{% else %}Delete this attachment?{% endif %}');"
+                                      class="d-inline">
+                                    <button type="submit" class="btn btn-outline-danger"
+                                            title="Delete attachment">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-muted text-center mb-3">No attachments yet.</p>
+                <p class="text-muted text-center mb-1">No attachments yet.</p>
+                {% if move.move_type in ('out_invoice', 'out_refund') and move.state == 'posted' %}
+                <p class="text-muted small text-center mb-3">
+                    Odoo creates the invoice PDF the first time you click <em>Send &amp; Print</em> in Odoo.
+                </p>
+                {% else %}
+                <p class="mb-3"></p>
+                {% endif %}
                 {% endif %}
 
                 {% if can_write %}
