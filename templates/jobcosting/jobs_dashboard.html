@@ -102,6 +102,23 @@
                 </tr>
                 {% endfor %}
             </tbody>
+            <tfoot>
+                <tr data-totals-row class="totals-row">
+                    {% for label, sort_type in columns %}
+                        {% if sort_type == 'currency' %}
+                        <td data-total-col="{{ loop.index0 }}" data-total-format="currency" class="text-end fw-bold"></td>
+                        {% elif sort_type == 'percent' %}
+                        <td data-total-col="{{ loop.index0 }}" data-total-format="percent" class="text-end fw-bold"></td>
+                        {% elif sort_type == 'number' %}
+                        <td data-total-col="{{ loop.index0 }}" data-total-format="number" class="text-end fw-bold"></td>
+                        {% elif loop.index0 == 0 %}
+                        <td class="fw-bold">Totals (filtered)</td>
+                        {% else %}
+                        <td></td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>
@@ -212,6 +229,11 @@ function applyFilters() {
 
     document.getElementById('jobCount').textContent = count;
 
+    var jobsTable = document.getElementById('jobsTable');
+    if (jobsTable && window.recomputeTableTotals) {
+        window.recomputeTableTotals(jobsTable);
+    }
+
     // If the default filter shows 0 results, fall back to 'all' so the page isn't blank on first load.
     if (count === 0 && currentStatus !== 'all' && !query) {
         currentStatus = 'all';
@@ -264,6 +286,10 @@ function toggleColumn(colIdx, visible) {
     table.querySelectorAll('tbody tr').forEach(function(row) {
         if (row.cells[colIdx]) row.cells[colIdx].style.display = display;
     });
+    var footRow = table.querySelector('tfoot tr');
+    if (footRow && footRow.cells[colIdx]) {
+        footRow.cells[colIdx].style.display = display;
+    }
 }
 
 function saveCols() {

@@ -603,6 +603,26 @@ body {
     opacity: 0.75;
 }
 
+/* In-page tables (job detail tabs) get the same direction triangles. */
+.sortable-th.sort-asc::after { content: ' \25B2'; font-size: 0.7rem; }
+.sortable-th.sort-desc::after { content: ' \25BC'; font-size: 0.7rem; }
+
+/* Toolbar for in-page (per-tab) tables */
+.inpage-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.inpage-toolbar .list-search {
+    flex: 1 1 260px;
+    max-width: 360px;
+}
+
 /* Pagination footer */
 .list-pagination {
     display: flex;

@@ -483,10 +483,25 @@
     <!-- TIMESHEETS TAB -->
     <div class="tab-pane fade p-0" id="tabTimesheets">
         {% if detail.timesheets %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search timesheets…"
+                       data-inpage-filter="#timesheetsTable"
+                       data-inpage-count="#timesheetsCount">
+            </label>
+            <span class="list-meta">Showing <strong id="timesheetsCount">{{ detail.timesheets|length }}</strong> entries</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="timesheetsTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Date</th><th>Description</th><th>Employee</th><th class="text-end">Hours</th><th class="text-end">Cost</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="date">Date</th>
+                        <th data-sort-col="1" data-sort-type="text">Description</th>
+                        <th data-sort-col="2" data-sort-type="text">Employee</th>
+                        <th data-sort-col="3" data-sort-type="hours" class="text-end">Hours</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end">Cost</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for line in detail.timesheets %}
@@ -494,11 +509,18 @@
                         <td>{{ line.date }}</td>
                         <td>{{ line.name[:60] }}{% if line.name|length > 60 %}...{% endif %}</td>
                         <td>{% if line.employee_id %}{{ line.employee_id[1] if line.employee_id is iterable and line.employee_id is not string else line.employee_id }}{% else %}-{% endif %}</td>
-                        <td class="text-end">{{ line.unit_amount_fmt }}</td>
-                        <td class="text-end">${{ '%.2f'|format((line.amount or 0)|abs) }}</td>
+                        <td class="text-end" data-value="{{ line.unit_amount or 0 }}">{{ line.unit_amount_fmt }}</td>
+                        <td class="text-end" data-value="{{ (line.amount or 0)|abs }}">${{ '%.2f'|format((line.amount or 0)|abs) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="hours" class="text-end fw-bold"></td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -509,10 +531,25 @@
     <!-- SALES ORDERS TAB -->
     <div class="tab-pane fade p-0" id="tabSalesOrders">
         {% if detail.sales_orders %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search sales orders…"
+                       data-inpage-filter="#salesOrdersTable"
+                       data-inpage-count="#salesOrdersCount">
+            </label>
+            <span class="list-meta">Showing <strong id="salesOrdersCount">{{ detail.sales_orders|length }}</strong> sales orders</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="salesOrdersTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Order #</th><th>Customer</th><th>Date</th><th class="text-end">Amount</th><th>Status</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">Order #</th>
+                        <th data-sort-col="1" data-sort-type="text">Customer</th>
+                        <th data-sort-col="2" data-sort-type="date">Date</th>
+                        <th data-sort-col="3" data-sort-type="currency" class="text-end">Amount</th>
+                        <th data-sort-col="4" data-sort-type="text">Status</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for so in detail.sales_orders %}
@@ -520,7 +557,7 @@
                         <td><strong>{{ so.name or '-' }}</strong></td>
                         <td>{{ so.partner_name }}</td>
                         <td>{{ so.display_date }}</td>
-                        <td class="text-end">${{ '%.2f'|format(so.amount_total or 0) }}</td>
+                        <td class="text-end" data-value="{{ so.amount_total or 0 }}">${{ '%.2f'|format(so.amount_total or 0) }}</td>
                         <td>
                             {% if so.state == 'sale' %}<span class="badge bg-success">Confirmed</span>
                             {% elif so.state == 'done' %}<span class="badge bg-primary">Done</span>
@@ -531,6 +568,13 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -541,17 +585,28 @@
     <!-- PURCHASE ORDERS TAB -->
     <div class="tab-pane fade p-0" id="tabPurchaseOrders">
         {% if detail.purchase_orders %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search POs by number or vendor…"
+                       data-inpage-filter="#purchaseOrdersTable"
+                       data-inpage-count="#purchaseOrdersCount">
+            </label>
+            <span class="list-meta">Showing <strong id="purchaseOrdersCount">{{ detail.purchase_orders|length }}</strong> purchase orders</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="purchaseOrdersTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
                     <tr>
-                        <th>PO #</th>
-                        <th>Vendor</th>
-                        <th>Date</th>
-                        <th class="text-end" title="PO line total attributed to this job by analytic distribution">Attributed</th>
-                        <th class="text-end" title="Uninvoiced portion: (qty − qty_invoiced) × price × pct">Committed</th>
-                        <th>Status</th>
-                        <th>Billing</th>
+                        <th data-sort-col="0" data-sort-type="text">PO #</th>
+                        <th data-sort-col="1" data-sort-type="text">Vendor</th>
+                        <th data-sort-col="2" data-sort-type="date">Date</th>
+                        <th data-sort-col="3" data-sort-type="currency" class="text-end"
+                            title="PO line total attributed to this job by analytic distribution">Attributed</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end"
+                            title="Uninvoiced portion: (qty − qty_invoiced) × price × pct">Committed</th>
+                        <th data-sort-col="5" data-sort-type="text">Status</th>
+                        <th data-sort-col="6" data-sort-type="text">Billing</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -560,8 +615,9 @@
                         <td><strong>{{ po.name or '-' }}</strong></td>
                         <td>{{ po.partner_name }}</td>
                         <td>{{ po.display_date }}</td>
-                        <td class="text-end">${{ '{:,.2f}'.format(po.attributed_amount or 0) }}</td>
-                        <td class="text-end {% if po.committed_amount and po.committed_amount > 0 %}text-warning fw-semibold{% endif %}">
+                        <td class="text-end" data-value="{{ po.attributed_amount or 0 }}">${{ '{:,.2f}'.format(po.attributed_amount or 0) }}</td>
+                        <td class="text-end {% if po.committed_amount and po.committed_amount > 0 %}text-warning fw-semibold{% endif %}"
+                            data-value="{{ po.committed_amount or 0 }}">
                             ${{ '{:,.2f}'.format(po.committed_amount or 0) }}
                         </td>
                         <td>
@@ -580,6 +636,14 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -590,10 +654,27 @@
     <!-- INVOICES TAB -->
     <div class="tab-pane fade p-0" id="tabInvoices">
         {% if detail.invoices %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search invoices…"
+                       data-inpage-filter="#invoicesTable"
+                       data-inpage-count="#invoicesCount">
+            </label>
+            <span class="list-meta">Showing <strong id="invoicesCount">{{ detail.invoices|length }}</strong> invoices</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="invoicesTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Invoice #</th><th>Type</th><th>Customer</th><th>Date</th><th class="text-end">Total</th><th class="text-end">Due</th><th>Payment</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">Invoice #</th>
+                        <th data-sort-col="1" data-sort-type="text">Type</th>
+                        <th data-sort-col="2" data-sort-type="text">Customer</th>
+                        <th data-sort-col="3" data-sort-type="date">Date</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end">Total</th>
+                        <th data-sort-col="5" data-sort-type="currency" class="text-end">Due</th>
+                        <th data-sort-col="6" data-sort-type="text">Payment</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for inv in detail.invoices %}
@@ -602,8 +683,9 @@
                         <td>{% if inv.move_type == 'out_refund' %}<span class="badge bg-warning text-dark">Credit Note</span>{% else %}Invoice{% endif %}</td>
                         <td>{{ inv.partner_name }}</td>
                         <td>{{ inv.display_date }}</td>
-                        <td class="text-end">{% if inv.move_type == 'out_refund' %}-{% endif %}${{ '%.2f'|format(inv.amount_total or 0) }}</td>
-                        <td class="text-end">${{ '%.2f'|format(inv.amount_residual or 0) }}</td>
+                        {% set inv_signed = -(inv.amount_total or 0) if inv.move_type == 'out_refund' else (inv.amount_total or 0) %}
+                        <td class="text-end" data-value="{{ inv_signed }}">{% if inv.move_type == 'out_refund' %}-{% endif %}${{ '%.2f'|format(inv.amount_total or 0) }}</td>
+                        <td class="text-end" data-value="{{ inv.amount_residual or 0 }}">${{ '%.2f'|format(inv.amount_residual or 0) }}</td>
                         <td>
                             {% if inv.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
                             {% elif inv.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
@@ -613,6 +695,14 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="4" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="5" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -623,34 +713,46 @@
     <!-- BILLS TAB -->
     <div class="tab-pane fade p-0" id="tabBills">
         {% if detail.bills %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search bills…"
+                       data-inpage-filter="#billsTable"
+                       data-inpage-count="#billsCount">
+            </label>
+            <span class="list-meta">Showing <strong id="billsCount">{{ detail.bills|length }}</strong> bills</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="billsTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
                     <tr>
-                        <th>Bill #</th>
-                        <th>Type</th>
-                        <th>Vendor</th>
-                        <th>Date</th>
-                        <th class="text-end" title="Portion of the bill total attributed to this job by analytic distribution">Attributed</th>
-                        <th class="text-end">Total</th>
-                        <th class="text-end">Due</th>
-                        <th>Payment</th>
+                        <th data-sort-col="0" data-sort-type="text">Bill #</th>
+                        <th data-sort-col="1" data-sort-type="text">Type</th>
+                        <th data-sort-col="2" data-sort-type="text">Vendor</th>
+                        <th data-sort-col="3" data-sort-type="date">Date</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end"
+                            title="Portion of the bill total attributed to this job by analytic distribution">Attributed</th>
+                        <th data-sort-col="5" data-sort-type="currency" class="text-end">Total</th>
+                        <th data-sort-col="6" data-sort-type="currency" class="text-end">Due</th>
+                        <th data-sort-col="7" data-sort-type="text">Payment</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for bill in detail.bills %}
+                    {% set bill_attr_signed = -(bill.attributed_amount or bill.amount_total or 0) if bill.move_type == 'in_refund' else (bill.attributed_amount or bill.amount_total or 0) %}
+                    {% set bill_total_signed = -(bill.amount_total or 0) if bill.move_type == 'in_refund' else (bill.amount_total or 0) %}
                     <tr {% if bill.move_type == 'in_refund' %}class="table-info"{% endif %}>
                         <td><strong>{{ bill.name or '-' }}</strong></td>
                         <td>{% if bill.move_type == 'in_refund' %}<span class="badge bg-info">Refund</span>{% else %}Bill{% endif %}</td>
                         <td>{{ bill.partner_name }}</td>
                         <td>{{ bill.display_date }}</td>
-                        <td class="text-end fw-semibold">
+                        <td class="text-end fw-semibold" data-value="{{ bill_attr_signed }}">
                             {% if bill.move_type == 'in_refund' %}-{% endif %}${{ '{:,.2f}'.format(bill.attributed_amount or bill.amount_total or 0) }}
                         </td>
-                        <td class="text-end text-muted">
+                        <td class="text-end text-muted" data-value="{{ bill_total_signed }}">
                             {% if bill.move_type == 'in_refund' %}-{% endif %}${{ '{:,.2f}'.format(bill.amount_total or 0) }}
                         </td>
-                        <td class="text-end">${{ '{:,.2f}'.format(bill.amount_residual or 0) }}</td>
+                        <td class="text-end" data-value="{{ bill.amount_residual or 0 }}">${{ '{:,.2f}'.format(bill.amount_residual or 0) }}</td>
                         <td>
                             {% if bill.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
                             {% elif bill.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
@@ -660,6 +762,15 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="4" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="5" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="6" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
