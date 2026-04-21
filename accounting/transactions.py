@@ -299,6 +299,59 @@ def get_open_sales_orders(odoo, limit=500):
     return orders
 
 
+def _coerce_analytic_distribution(raw):
+    """Return a dict form of analytic_distribution regardless of how Odoo
+    serialised it over XML-RPC.
+
+    Observed shapes:
+      - dict: ``{"24": 100.0}`` or compound ``{"24,42": 100.0}``
+      - JSON string: ``'{"24": 100.0}'`` (some older builds)
+      - False/None/empty: no distribution on this line
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _tally_analytic_distribution(lines, amount_field='price_subtotal'):
+    """Majority-wins analytic ID across a list of lines.
+
+    Each line's ``analytic_distribution`` is normalised via
+    ``_coerce_analytic_distribution``, compound keys are split, and
+    percentages are applied to the line's money-value field. The ID whose
+    cumulative dollar value is highest wins.
+    """
+    totals = {}
+    for ln in lines or []:
+        dist = _coerce_analytic_distribution(ln.get('analytic_distribution'))
+        if not dist:
+            continue
+        line_total = ln.get(amount_field, 0) or 0
+        for key, pct in dist.items():
+            for raw in str(key).split(','):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    aid = int(raw)
+                except (ValueError, TypeError):
+                    continue
+                totals[aid] = (
+                    totals.get(aid, 0) + line_total * (pct or 0) / 100.0
+                )
+    if not totals:
+        return None
+    return max(totals, key=totals.get)
+
+
 def get_sale_order_detail(odoo, so_id):
     """Fetch one sale.order with line-level analytic info, formatted for the
     JS that pre-fills the Create Invoice form.
@@ -306,7 +359,8 @@ def get_sale_order_detail(odoo, so_id):
     Returns ``None`` if the order isn't found. The analytic account picked
     is the one tagged on the largest dollar value of lines — the simple
     majority wins, which matches how progress billing usually works (one
-    job per SO).
+    job per SO). Also enriches with the analytic account's name/code so
+    the form can display something human before the dropdown rebuilds.
     """
     orders = odoo.safe_search_read(
         'sale.order',
@@ -329,29 +383,38 @@ def get_sale_order_detail(odoo, so_id):
             order='sequence asc, id asc',
         )
 
-    # Pick the dominant analytic account across the SO lines.
-    totals_by_account = {}
-    for ln in lines:
-        dist = ln.get('analytic_distribution') or {}
-        if not isinstance(dist, dict):
-            continue
-        line_total = ln.get('price_subtotal', 0) or 0
-        for key, pct in dist.items():
-            # Compound analytic-plan keys ("24,42") split on comma.
-            for raw in str(key).split(','):
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    aid = int(raw)
-                except (ValueError, TypeError):
-                    continue
-                totals_by_account[aid] = (
-                    totals_by_account.get(aid, 0) + line_total * (pct or 0) / 100.0
-                )
-    analytic_id = None
-    if totals_by_account:
-        analytic_id = max(totals_by_account, key=totals_by_account.get)
+    analytic_id = _tally_analytic_distribution(lines)
+
+    # Fallback: in some Odoo 17 setups the SO itself carries an analytic
+    # account via project_id (CE) or a direct analytic_account_id on the
+    # header. Try both and give up silently if neither field exists.
+    if not analytic_id:
+        try:
+            header = odoo.safe_search_read(
+                'sale.order',
+                [('id', '=', so_id)],
+                fields=['analytic_account_id'],
+            )
+            if header and header[0].get('analytic_account_id'):
+                val = header[0]['analytic_account_id']
+                analytic_id = val[0] if isinstance(val, (list, tuple)) else val
+        except Exception:
+            pass
+
+    analytic_name = ''
+    analytic_code = ''
+    if analytic_id:
+        try:
+            acct = odoo.search_read(
+                'account.analytic.account',
+                [('id', '=', analytic_id)],
+                fields=['id', 'name', 'code'],
+            )
+            if acct:
+                analytic_name = acct[0].get('name') or ''
+                analytic_code = acct[0].get('code') or ''
+        except Exception:
+            pass
 
     partner = so.get('partner_id')
     partner_id = partner[0] if isinstance(partner, (list, tuple)) else partner
@@ -365,6 +428,8 @@ def get_sale_order_detail(odoo, so_id):
         'amount_untaxed': so.get('amount_untaxed', 0) or 0,
         'invoice_status': so.get('invoice_status'),
         'analytic_id': analytic_id,
+        'analytic_name': analytic_name,
+        'analytic_code': analytic_code,
         'line_count': len(lines),
     }
 

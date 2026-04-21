@@ -98,9 +98,18 @@
     {% set bs = billing_summary %}
     <div class="form-section" style="border-left: 4px solid #0dcaf0;">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">
-                <i class="bi bi-receipt"></i> Progress Billing Summary
-            </h6>
+            <div>
+                <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">
+                    <i class="bi bi-receipt"></i> Progress Billing Summary
+                </h6>
+                {% if bs.analytic_name %}
+                <div class="fw-semibold mt-1">
+                    <i class="bi bi-briefcase text-info"></i>
+                    {% if bs.analytic_code %}<span class="text-muted">{{ bs.analytic_code }}</span> &middot; {% endif %}
+                    {{ bs.analytic_name }}
+                </div>
+                {% endif %}
+            </div>
             <a href="{{ url_for('jobcosting.job_detail', account_id=bs.analytic_id) }}"
                class="btn btn-sm btn-outline-info">
                 <i class="bi bi-arrow-up-right-square"></i> Open Job
@@ -993,11 +1002,25 @@ document.addEventListener('DOMContentLoaded', calcTotal);
                 if (data.analytic_id) setSelectValue('analytic_id', String(data.analytic_id));
                 if (data.name) setText('ref', data.name);
                 if (helpEl) {
-                    helpEl.innerHTML =
-                        'Imported <strong>' + data.name + '</strong> · ' +
-                        (data.partner_name || '') + ' · $' +
-                        Number(data.amount_total || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) +
-                        '. Add your progress-billing line below.';
+                    var jobLabel = '';
+                    if (data.analytic_name) {
+                        jobLabel = ' · <i class="bi bi-briefcase"></i> ' +
+                            (data.analytic_code ? '<span class="text-muted">' + data.analytic_code + '</span> ' : '') +
+                            data.analytic_name;
+                    }
+                    var amountStr = Number(data.amount_total || 0).toLocaleString(
+                        'en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+                    var msg =
+                        '<i class="bi bi-check-circle text-success"></i> Imported <strong>' +
+                        data.name + '</strong> · ' + (data.partner_name || '') +
+                        jobLabel + ' · $' + amountStr;
+                    if (!data.analytic_id) {
+                        msg += '<br><span class="text-warning">' +
+                            '<i class="bi bi-exclamation-triangle"></i> ' +
+                            'No analytic account is tagged on this SO — pick a Job manually below.' +
+                            '</span>';
+                    }
+                    helpEl.innerHTML = msg;
                 }
             })
             .catch(function(err) {

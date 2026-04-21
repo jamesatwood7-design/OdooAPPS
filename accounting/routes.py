@@ -221,30 +221,9 @@ def bill_list():
 # ---------------------------------------------------------------------------
 
 def _pick_dominant_analytic(invoice_lines):
-    """Given an invoice's invoice_lines (each with analytic_distribution),
-    return the analytic account ID that carries the largest attributed
-    dollar value. Matches the logic used when pre-filling Create Invoice
-    from a Sales Order so the two surfaces agree.
-    """
-    totals = {}
-    for line in invoice_lines or []:
-        dist = line.get('analytic_distribution') or {}
-        if not isinstance(dist, dict):
-            continue
-        amount = line.get('price_subtotal', 0) or 0
-        for key, pct in dist.items():
-            for raw in str(key).split(','):
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    aid = int(raw)
-                except (ValueError, TypeError):
-                    continue
-                totals[aid] = totals.get(aid, 0) + amount * (pct or 0) / 100.0
-    if not totals:
-        return None
-    return max(totals, key=totals.get)
+    """Delegate to the shared tally helper so SO import and invoice view
+    agree on which job an invoice belongs to."""
+    return transactions._tally_analytic_distribution(invoice_lines)
 
 
 def _handle_move_create(kind, move=None):

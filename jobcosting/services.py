@@ -941,6 +941,9 @@ def get_billing_summary(odoo, account_id, financials=None):
         customer_id / customer_name  Taken from the first sales order and
                          falling back to the first invoice. Used to pre-fill
                          the Create Progress Bill form.
+        analytic_id / analytic_name / analytic_code
+                         The job itself, so views that receive only the
+                         summary can still show "Contract on <Job Name>".
     """
     if financials is None:
         financials = get_job_financials(odoo, account_id)
@@ -956,11 +959,6 @@ def get_billing_summary(odoo, account_id, financials=None):
         (m.get('amount_total', 0) or 0) - (m.get('amount_residual', 0) or 0)
         for m in posted_out_invoices
     )
-
-    # Credit notes reduce both billed and paid (Odoo applies refund payments
-    # symmetrically), but for simplicity we track only customer invoices here
-    # — refunds are rare on progress billing and any overcount will show up
-    # clearly on the summary.
 
     customer_id = None
     customer_name = ''
@@ -978,6 +976,22 @@ def get_billing_summary(odoo, account_id, financials=None):
                 customer_name = pid[1] if isinstance(pid, (list, tuple)) else ''
                 break
 
+    # Fetch the analytic account so views can show "<code> <name>" without
+    # an extra round trip.
+    analytic_name = ''
+    analytic_code = ''
+    try:
+        acct = odoo.search_read(
+            'account.analytic.account',
+            [('id', '=', account_id)],
+            fields=['id', 'name', 'code'],
+        )
+        if acct:
+            analytic_name = acct[0].get('name') or ''
+            analytic_code = acct[0].get('code') or ''
+    except Exception:
+        pass
+
     return {
         'contract': contract,
         'billed': billed,
@@ -987,6 +1001,9 @@ def get_billing_summary(odoo, account_id, financials=None):
         'progress_bill_count': len(posted_out_invoices),
         'customer_id': customer_id,
         'customer_name': customer_name,
+        'analytic_id': account_id,
+        'analytic_name': analytic_name,
+        'analytic_code': analytic_code,
     }
 
 
