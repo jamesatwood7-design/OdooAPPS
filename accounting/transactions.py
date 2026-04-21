@@ -279,8 +279,11 @@ def get_open_sales_orders(odoo, limit=500):
     Invoice form's "From Sales Order" picker.
 
     Returns orders in 'sale' or 'done' state, ordered newest-first, with
-    enough fields for the picker to show number, customer, and contract
-    remaining.
+    enough fields for the picker to show number, customer, job (analytic)
+    name, and total. Each SO is enriched with ``analytic_name`` and
+    ``analytic_code`` so the dropdown can identify a project by name —
+    general contractors with multiple active jobs aren't distinguishable
+    by customer name alone.
     """
     try:
         orders = odoo.search_read(
@@ -296,6 +299,79 @@ def get_open_sales_orders(odoo, limit=500):
         return []
     for so in orders:
         so['partner_name'] = format_many2one(so.get('partner_id'))
+        so['analytic_id'] = None
+        so['analytic_name'] = ''
+        so['analytic_code'] = ''
+
+    if not orders:
+        return orders
+
+    # --- Batch-fetch SO lines and group by order_id ---
+    order_ids = [o['id'] for o in orders]
+    lines_by_order = {}
+    try:
+        all_lines = odoo.safe_search_read(
+            'sale.order.line',
+            [('order_id', 'in', order_ids)],
+            fields=['order_id', 'analytic_distribution', 'price_subtotal'],
+            limit=5000,  # soft cap; 500 SOs × ~5 lines typical
+        )
+        for ln in all_lines:
+            oid = ln.get('order_id')
+            oid = oid[0] if isinstance(oid, (list, tuple)) else oid
+            if not oid:
+                continue
+            lines_by_order.setdefault(oid, []).append(ln)
+    except Exception:
+        pass
+
+    # --- Resolve dominant analytic per SO (majority-wins on line totals) ---
+    for so in orders:
+        aid = _tally_analytic_distribution(lines_by_order.get(so['id'], []))
+        if aid:
+            so['analytic_id'] = aid
+
+    # --- Header-level fallback for SOs without a line-level analytic ---
+    missing_ids = [o['id'] for o in orders if not o['analytic_id']]
+    if missing_ids:
+        try:
+            headers = odoo.safe_search_read(
+                'sale.order',
+                [('id', 'in', missing_ids)],
+                fields=['id', 'analytic_account_id'],
+            )
+            header_map = {}
+            for h in headers:
+                val = h.get('analytic_account_id')
+                if val:
+                    header_map[h['id']] = (
+                        val[0] if isinstance(val, (list, tuple)) else val
+                    )
+            for so in orders:
+                if not so['analytic_id'] and so['id'] in header_map:
+                    so['analytic_id'] = header_map[so['id']]
+        except Exception:
+            # Field not present on this Odoo install — fine, leave analytic empty.
+            pass
+
+    # --- One batched fetch of every analytic account we touched ---
+    account_ids = sorted({o['analytic_id'] for o in orders if o['analytic_id']})
+    if account_ids:
+        try:
+            accounts = odoo.search_read(
+                'account.analytic.account',
+                [('id', 'in', account_ids)],
+                fields=['id', 'name', 'code'],
+            )
+            acct_map = {a['id']: a for a in accounts}
+            for so in orders:
+                aid = so['analytic_id']
+                if aid and aid in acct_map:
+                    so['analytic_name'] = acct_map[aid].get('name') or ''
+                    so['analytic_code'] = acct_map[aid].get('code') or ''
+        except Exception:
+            pass
+
     return orders
 
 

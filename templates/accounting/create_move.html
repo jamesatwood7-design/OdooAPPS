@@ -469,8 +469,11 @@
                     <option value="">— Pick a sales order to import —</option>
                     {% for so in sales_orders %}
                     <option value="{{ so.id }}" data-name="{{ so.name }}">
-                        {{ so.name }} &middot; {{ so.partner_name }} &middot; ${{ '{:,.0f}'.format(so.amount_total or 0) }}
-                        {% if so.invoice_status == 'invoiced' %} &middot; fully invoiced{% endif %}
+                        {{ so.name }}
+                        {%- if so.analytic_name %} &middot;
+                            {%- if so.analytic_code %} [{{ so.analytic_code }}]{% endif %} {{ so.analytic_name }}
+                        {%- endif %} &middot; {{ so.partner_name }} &middot; ${{ '{:,.0f}'.format(so.amount_total or 0) }}
+                        {%- if so.invoice_status == 'invoiced' %} &middot; fully invoiced{% endif %}
                     </option>
                     {% endfor %}
                 </select>
