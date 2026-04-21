@@ -923,6 +923,73 @@ def get_job_financials(odoo, account_id):
     }
 
 
+def get_billing_summary(odoo, account_id, financials=None):
+    """Compute progress-billing context for a job.
+
+    Reuses get_job_financials so the numbers match the Job Detail page.
+    Pass ``financials`` if the caller already has it to avoid a double
+    fetch.
+
+    Returns:
+        contract         Total contract value (sales orders in sale/done state).
+        billed           Net invoiced (posted invoices minus posted credit notes).
+        paid             Sum of (amount_total - amount_residual) across posted
+                         customer invoices — the portion already cleared.
+        outstanding      billed - paid — the AR balance on this job.
+        remaining        contract - billed — the amount still left to invoice.
+        progress_bill_count  Count of posted customer invoices for this job.
+        customer_id / customer_name  Taken from the first sales order and
+                         falling back to the first invoice. Used to pre-fill
+                         the Create Progress Bill form.
+    """
+    if financials is None:
+        financials = get_job_financials(odoo, account_id)
+
+    contract = financials.get('total_contract', 0) or 0
+    billed = financials.get('net_invoiced', 0) or 0
+
+    posted_out_invoices = [
+        m for m in financials.get('invoices', [])
+        if m.get('move_type') == 'out_invoice' and m.get('state') == 'posted'
+    ]
+    paid = sum(
+        (m.get('amount_total', 0) or 0) - (m.get('amount_residual', 0) or 0)
+        for m in posted_out_invoices
+    )
+
+    # Credit notes reduce both billed and paid (Odoo applies refund payments
+    # symmetrically), but for simplicity we track only customer invoices here
+    # — refunds are rare on progress billing and any overcount will show up
+    # clearly on the summary.
+
+    customer_id = None
+    customer_name = ''
+    for so in financials.get('sales_orders', []):
+        pid = so.get('partner_id')
+        if pid:
+            customer_id = pid[0] if isinstance(pid, (list, tuple)) else pid
+            customer_name = pid[1] if isinstance(pid, (list, tuple)) else ''
+            break
+    if not customer_id:
+        for inv in posted_out_invoices:
+            pid = inv.get('partner_id')
+            if pid:
+                customer_id = pid[0] if isinstance(pid, (list, tuple)) else pid
+                customer_name = pid[1] if isinstance(pid, (list, tuple)) else ''
+                break
+
+    return {
+        'contract': contract,
+        'billed': billed,
+        'paid': paid,
+        'outstanding': billed - paid,
+        'remaining': contract - billed,
+        'progress_bill_count': len(posted_out_invoices),
+        'customer_id': customer_id,
+        'customer_name': customer_name,
+    }
+
+
 def get_job_detail(odoo, account_id):
     """Fetch full detail for a single analytic account (job).
 
@@ -964,11 +1031,13 @@ def get_job_detail(odoo, account_id):
 
     # Computed financials from source data
     financials = get_job_financials(odoo, account_id)
+    billing = get_billing_summary(odoo, account_id, financials=financials)
 
     return {
         'account': account,
         'sections': rendered_sections,
         'financials': financials,
+        'billing': billing,
         'timesheets': financials['timesheets'],
         'sales_orders': financials['sales_orders'],
         'purchase_orders': financials['purchase_orders'],

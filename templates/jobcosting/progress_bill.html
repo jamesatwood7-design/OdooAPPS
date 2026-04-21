@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Progress Bill — {{ detail.account.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-0">Create Progress Bill</h3>
+        <small class="text-muted">
+            {% if detail.account.code %}<strong>{{ detail.account.code }}</strong> &middot; {% endif %}
+            {{ detail.account.name }}
+            {% if billing.customer_name %} &middot; <i class="bi bi-person"></i> {{ billing.customer_name }}{% endif %}
+        </small>
+    </div>
+    <a href="{{ url_for('jobcosting.job_detail', account_id=detail.account.id) }}"
+       class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Job
+    </a>
+</div>
+
+{% if not billing.customer_id %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    This job has no linked customer. Add a customer to a sales order for this
+    job first — otherwise there's nowhere to send the invoice.
+</div>
+{% endif %}
+
+<div class="row g-3">
+    {# ── Billing summary card ─────────────────────────────────────────── #}
+    <div class="col-lg-5">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h6 class="mb-0 text-uppercase text-muted" style="letter-spacing:0.5px; font-size:0.72rem;">
+                    Billing Summary
+                </h6>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td class="text-muted">Contract Total</td>
+                            <td class="text-end fw-semibold">${{ '{:,.2f}'.format(billing.contract) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Billed to Date</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(billing.billed) }}
+                                <small class="text-muted ms-1">
+                                    ({% if billing.contract %}{{ '{:.1f}'.format(billing.billed / billing.contract * 100) }}%{% else %}—{% endif %})
+                                </small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Paid to Date</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(billing.paid) }}
+                                <small class="text-muted ms-1">
+                                    ({% if billing.contract %}{{ '{:.1f}'.format(billing.paid / billing.contract * 100) }}%{% else %}—{% endif %})
+                                </small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Outstanding</td>
+                            <td class="text-end {% if billing.outstanding > 0 %}text-danger{% endif %}">
+                                ${{ '{:,.2f}'.format(billing.outstanding) }}
+                            </td>
+                        </tr>
+                        <tr class="border-top">
+                            <td class="fw-semibold">Remaining to Bill</td>
+                            <td class="text-end fw-semibold {% if billing.remaining < 0 %}text-danger{% else %}text-success{% endif %}">
+                                ${{ '{:,.2f}'.format(billing.remaining) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="mt-3">
+                    <small class="text-muted">
+                        {{ billing.progress_bill_count }} prior posted invoice{{ 's' if billing.progress_bill_count != 1 else '' }}.
+                        This will be progress bill #{{ next_number }}.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Create form ──────────────────────────────────────────────────── #}
+    <div class="col-lg-7">
+        <form method="POST" class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h6 class="mb-0 text-uppercase text-muted" style="letter-spacing:0.5px; font-size:0.72rem;">
+                    New Progress Billing
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label fw-semibold">
+                            Milestone <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" name="milestone" class="form-control" required
+                               placeholder="e.g. Deposit, Foundation Complete, Delivery, Final Payment"
+                               value="Progress Billing #{{ next_number }}">
+                        <small class="text-muted">Shown on the invoice line the customer sees.</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Invoice Date</label>
+                        <input type="date" name="invoice_date" class="form-control"
+                               value="{{ today }}" required>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">
+                            Percent of Contract
+                        </label>
+                        <div class="input-group">
+                            <input type="number" id="pctInput" class="form-control text-end"
+                                   min="0" max="200" step="0.01" placeholder="25">
+                            <span class="input-group-text">%</span>
+                        </div>
+                        <small class="text-muted">Type a % — we'll compute the amount.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">
+                            Amount <span class="text-danger">*</span>
+                        </label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" name="amount" id="amountInput"
+                                   class="form-control text-end" required
+                                   min="0.01" step="0.01" placeholder="0.00">
+                        </div>
+                        <small class="text-muted">Or type an amount directly.</small>
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Additional Notes (optional)</label>
+                        <textarea name="extra_notes" class="form-control" rows="2"
+                                  placeholder="Anything extra you'd like the customer to see under the progress summary."></textarea>
+                    </div>
+                </div>
+
+                {# ── Live preview of what the customer will see ──────── #}
+                <div class="alert alert-secondary mt-4 mb-0" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;" id="previewBox">
+<strong class="d-block mb-2" style="font-family: inherit;">Preview — will appear on the invoice PDF</strong><span id="previewText">Enter an amount to preview.</span>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    Creates a <strong>draft</strong> invoice. Review and post it from the Invoices page.
+                </small>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('jobcosting.job_detail', account_id=detail.account.id) }}"
+                       class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary" {% if not billing.customer_id %}disabled{% endif %}>
+                        <i class="bi bi-plus-circle"></i> Create Draft Invoice
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var CONTRACT = {{ billing.contract or 0 }};
+var PREV_BILLED = {{ billing.billed or 0 }};
+var PREV_PAID = {{ billing.paid or 0 }};
+
+var pctInput = document.getElementById('pctInput');
+var amountInput = document.getElementById('amountInput');
+var previewText = document.getElementById('previewText');
+
+function fmtMoney(n) {
+    return '$' + (n || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtPct(n) {
+    if (!CONTRACT) return '—';
+    return (n / CONTRACT * 100).toFixed(1) + '%';
+}
+
+function syncAmountFromPct() {
+    var pct = parseFloat(pctInput.value);
+    if (isNaN(pct) || !CONTRACT) { updatePreview(); return; }
+    amountInput.value = (CONTRACT * pct / 100).toFixed(2);
+    updatePreview();
+}
+
+function syncPctFromAmount() {
+    var amt = parseFloat(amountInput.value);
+    if (isNaN(amt) || !CONTRACT) { updatePreview(); return; }
+    pctInput.value = (amt / CONTRACT * 100).toFixed(2);
+    updatePreview();
+}
+
+function updatePreview() {
+    var amt = parseFloat(amountInput.value);
+    if (isNaN(amt) || amt <= 0) {
+        previewText.textContent = 'Enter an amount to preview.';
+        return;
+    }
+    var totalBilled = PREV_BILLED + amt;
+    var outstanding = totalBilled - PREV_PAID;
+    var remaining = CONTRACT - totalBilled;
+    var sep = '—'.repeat(38);
+    var lines = [
+        'Progress Billing Summary',
+        sep,
+        'Contract Total:        ' + fmtMoney(CONTRACT),
+        'Previously Billed:     ' + fmtMoney(PREV_BILLED) + '  (' + fmtPct(PREV_BILLED) + ')',
+        'Previously Paid:       ' + fmtMoney(PREV_PAID)   + '  (' + fmtPct(PREV_PAID) + ')',
+        'This Invoice:          ' + fmtMoney(amt)         + '  (' + fmtPct(amt) + ')',
+        sep,
+        'Total Billed to Date:  ' + fmtMoney(totalBilled) + '  (' + fmtPct(totalBilled) + ')',
+        'Outstanding Balance:   ' + fmtMoney(outstanding) + '  (' + fmtPct(outstanding) + ')',
+        'Remaining on Contract: ' + fmtMoney(remaining)   + '  (' + fmtPct(remaining) + ')'
+    ];
+    previewText.textContent = lines.join('\n');
+}
+
+pctInput.addEventListener('input', syncAmountFromPct);
+amountInput.addEventListener('input', syncPctFromAmount);
+updatePreview();
+</script>
+{% endblock %}

@@ -230,6 +230,80 @@ def job_detail(account_id):
     return render_template('jobcosting/job_detail.html', detail=detail)
 
 
+@bp.route('/job/<int:account_id>/progress-bill', methods=['GET', 'POST'])
+@odoo_user_required
+def progress_bill(account_id):
+    """Create a progress-billing invoice for this job.
+
+    GET shows the form (pre-filled with customer + billing context).
+    POST validates amount & milestone, calls create_progress_bill(),
+    then jumps to the resulting draft invoice so the user can review,
+    attach files, and post.
+    """
+    from accounting import transactions
+
+    odoo = current_app.odoo
+
+    detail = None
+    try:
+        detail = services.get_job_detail(odoo, account_id)
+    except Exception as e:
+        flash(f'Error loading job: {e}', 'danger')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    if not detail:
+        flash('Job not found.', 'warning')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    billing = detail['billing']
+
+    if request.method == 'POST':
+        try:
+            milestone = (request.form.get('milestone') or '').strip()
+            amount = request.form.get('amount', type=float) or 0.0
+            invoice_date = request.form.get('invoice_date') or date.today().isoformat()
+            extra_notes = request.form.get('extra_notes', '')
+
+            if not milestone:
+                flash('Milestone label is required.', 'warning')
+                return redirect(request.path)
+            if amount <= 0:
+                flash('Amount must be greater than zero.', 'warning')
+                return redirect(request.path)
+            if not billing.get('customer_id'):
+                flash('This job has no linked customer — set one on a sales '
+                      'order first, or create the invoice manually.',
+                      'danger')
+                return redirect(request.path)
+
+            move_id = transactions.create_progress_bill(
+                odoo,
+                partner_id=billing['customer_id'],
+                analytic_id=account_id,
+                milestone=milestone,
+                amount=amount,
+                invoice_date=invoice_date,
+                contract=billing['contract'],
+                previously_billed=billing['billed'],
+                previously_paid=billing['paid'],
+                extra_notes=extra_notes,
+            )
+            flash('Progress bill created as draft. Review and post when ready.',
+                  'success')
+            return redirect(url_for('accounting.view_move', move_id=move_id))
+        except Exception as e:
+            current_app.logger.exception('Error creating progress bill')
+            flash(f'Error creating progress bill: {e}', 'danger')
+
+    return render_template(
+        'jobcosting/progress_bill.html',
+        detail=detail,
+        billing=billing,
+        today=date.today().isoformat(),
+        next_number=billing.get('progress_bill_count', 0) + 1,
+    )
+
+
 @bp.route('/job/<int:account_id>/save', methods=['POST'])
 @odoo_user_required
 def job_save(account_id):

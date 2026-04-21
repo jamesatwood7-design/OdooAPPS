@@ -237,6 +237,73 @@ def create_invoice(odoo, partner_id, invoice_date, lines, **kwargs):
                         lines, **kwargs)
 
 
+def format_progress_summary(contract, previously_billed, previously_paid,
+                            this_invoice):
+    """Render the Progress Billing Summary that will appear on the PDF.
+
+    Lives in the invoice's narration / Customer Notes, which Odoo prints at
+    the bottom of the default invoice template. All figures are computed
+    server-side at the moment the invoice is created, so the customer sees
+    a consistent snapshot.
+    """
+    total_billed = (previously_billed or 0) + (this_invoice or 0)
+    outstanding = total_billed - (previously_paid or 0)
+    remaining = (contract or 0) - total_billed
+
+    def pct(n):
+        if not contract:
+            return '—'
+        return f'{(n / contract * 100):.1f}%'
+
+    def dol(n):
+        return f'${n:,.2f}'
+
+    sep = '—' * 38
+    lines = [
+        'Progress Billing Summary',
+        sep,
+        f'Contract Total:        {dol(contract)}',
+        f'Previously Billed:     {dol(previously_billed)}  ({pct(previously_billed)})',
+        f'Previously Paid:       {dol(previously_paid)}  ({pct(previously_paid)})',
+        f'This Invoice:          {dol(this_invoice)}  ({pct(this_invoice)})',
+        sep,
+        f'Total Billed to Date:  {dol(total_billed)}  ({pct(total_billed)})',
+        f'Outstanding Balance:   {dol(outstanding)}  ({pct(outstanding)})',
+        f'Remaining on Contract: {dol(remaining)}  ({pct(remaining)})',
+    ]
+    return '\n'.join(lines)
+
+
+def create_progress_bill(odoo, partner_id, analytic_id, milestone, amount,
+                         invoice_date, contract, previously_billed,
+                         previously_paid, extra_notes=''):
+    """Create a draft customer invoice for one progress-billing milestone.
+
+    Produces a single-line invoice ("Progress Billing — <milestone>") for the
+    chosen amount, tagged to the job's analytic account, with the progress
+    summary baked into Customer Notes so it prints on the PDF.
+    """
+    summary = format_progress_summary(
+        contract, previously_billed, previously_paid, amount,
+    )
+    notes_parts = [summary]
+    if extra_notes and extra_notes.strip():
+        notes_parts.append(extra_notes.strip())
+    customer_notes = '\n\n'.join(notes_parts)
+
+    lines = [{
+        'quantity': 1.0,
+        'price_unit': amount,
+        'name': f'Progress Billing — {milestone}',
+    }]
+
+    return create_invoice(
+        odoo, partner_id, invoice_date, lines,
+        analytic_id=analytic_id,
+        customer_notes=customer_notes,
+    )
+
+
 def create_bill(odoo, partner_id, invoice_date, lines, **kwargs):
     """Create a vendor bill (account.move with move_type='in_invoice')."""
     return _create_move(odoo, 'in_invoice', partner_id, invoice_date,
