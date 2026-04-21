@@ -274,6 +274,101 @@ def format_progress_summary(contract, previously_billed, previously_paid,
     return '\n'.join(lines)
 
 
+def get_open_sales_orders(odoo, limit=500):
+    """Confirmed sales orders available for invoicing, used by the Create
+    Invoice form's "From Sales Order" picker.
+
+    Returns orders in 'sale' or 'done' state, ordered newest-first, with
+    enough fields for the picker to show number, customer, and contract
+    remaining.
+    """
+    try:
+        orders = odoo.search_read(
+            'sale.order',
+            [('state', 'in', ['sale', 'done'])],
+            fields=['id', 'name', 'partner_id', 'date_order',
+                    'amount_total', 'amount_untaxed',
+                    'invoice_status'],
+            order='date_order desc, name desc',
+            limit=limit,
+        )
+    except Exception:
+        return []
+    for so in orders:
+        so['partner_name'] = format_many2one(so.get('partner_id'))
+    return orders
+
+
+def get_sale_order_detail(odoo, so_id):
+    """Fetch one sale.order with line-level analytic info, formatted for the
+    JS that pre-fills the Create Invoice form.
+
+    Returns ``None`` if the order isn't found. The analytic account picked
+    is the one tagged on the largest dollar value of lines — the simple
+    majority wins, which matches how progress billing usually works (one
+    job per SO).
+    """
+    orders = odoo.safe_search_read(
+        'sale.order',
+        [('id', '=', so_id)],
+        fields=['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed',
+                'order_line', 'invoice_status'],
+    )
+    if not orders:
+        return None
+    so = orders[0]
+
+    lines = []
+    if so.get('order_line'):
+        lines = odoo.safe_search_read(
+            'sale.order.line',
+            [('id', 'in', so['order_line'])],
+            fields=['id', 'name', 'product_id', 'product_uom_qty',
+                    'price_unit', 'discount', 'tax_id',
+                    'analytic_distribution', 'price_subtotal'],
+            order='sequence asc, id asc',
+        )
+
+    # Pick the dominant analytic account across the SO lines.
+    totals_by_account = {}
+    for ln in lines:
+        dist = ln.get('analytic_distribution') or {}
+        if not isinstance(dist, dict):
+            continue
+        line_total = ln.get('price_subtotal', 0) or 0
+        for key, pct in dist.items():
+            # Compound analytic-plan keys ("24,42") split on comma.
+            for raw in str(key).split(','):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    aid = int(raw)
+                except (ValueError, TypeError):
+                    continue
+                totals_by_account[aid] = (
+                    totals_by_account.get(aid, 0) + line_total * (pct or 0) / 100.0
+                )
+    analytic_id = None
+    if totals_by_account:
+        analytic_id = max(totals_by_account, key=totals_by_account.get)
+
+    partner = so.get('partner_id')
+    partner_id = partner[0] if isinstance(partner, (list, tuple)) else partner
+
+    return {
+        'id': so['id'],
+        'name': so.get('name'),
+        'partner_id': partner_id,
+        'partner_name': format_many2one(partner),
+        'amount_total': so.get('amount_total', 0) or 0,
+        'amount_untaxed': so.get('amount_untaxed', 0) or 0,
+        'invoice_status': so.get('invoice_status'),
+        'analytic_id': analytic_id,
+        'line_count': len(lines),
+    }
+
+
 def create_progress_bill(odoo, partner_id, analytic_id, milestone, amount,
                          invoice_date, contract, previously_billed,
                          previously_paid, extra_notes=''):

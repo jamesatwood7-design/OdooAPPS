@@ -93,6 +93,93 @@
         </div>
     </div>
 
+    {# Progress Billing Summary — only when this invoice is tied to a job #}
+    {% if billing_summary and move_type == 'invoice' %}
+    {% set bs = billing_summary %}
+    <div class="form-section" style="border-left: 4px solid #0dcaf0;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">
+                <i class="bi bi-receipt"></i> Progress Billing Summary
+            </h6>
+            <a href="{{ url_for('jobcosting.job_detail', account_id=bs.analytic_id) }}"
+               class="btn btn-sm btn-outline-info">
+                <i class="bi bi-arrow-up-right-square"></i> Open Job
+            </a>
+        </div>
+        {% if move.state == 'draft' %}
+        <div class="alert alert-warning small py-2 mb-3">
+            <i class="bi bi-info-circle"></i> This invoice is still a draft —
+            the numbers below do not yet include it. They'll update as soon
+            as it's posted.
+        </div>
+        {% endif %}
+        {% set contract_pct = (bs.billed / bs.contract * 100) if bs.contract else 0 %}
+        {% if contract_pct > 100 %}{% set contract_pct = 100 %}{% endif %}
+        {% set paid_pct = (bs.paid / bs.contract * 100) if bs.contract else 0 %}
+        {% if paid_pct > 100 %}{% set paid_pct = 100 %}{% endif %}
+        {% if bs.contract %}
+        <div class="progress mb-3" style="height: 20px;">
+            <div class="progress-bar bg-success" style="width: {{ paid_pct }}%"
+                 title="Paid by customer">
+                {% if paid_pct > 8 %}{{ '{:.0f}'.format(paid_pct) }}% Paid{% endif %}
+            </div>
+            {% set unpaid_width = contract_pct - paid_pct %}
+            {% if unpaid_width > 0 %}
+            <div class="progress-bar bg-warning" style="width: {{ unpaid_width }}%"
+                 title="Billed but not yet paid">
+                {% if unpaid_width > 8 %}{{ '{:.0f}'.format(unpaid_width) }}% Unpaid{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="row row-cols-2 row-cols-md-5 g-2">
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Contract</small>
+                    <strong>${{ '{:,.0f}'.format(bs.contract) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Billed to Date</small>
+                    <strong>${{ '{:,.0f}'.format(bs.billed) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Paid</small>
+                    <strong class="text-success">${{ '{:,.0f}'.format(bs.paid) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Outstanding</small>
+                    <strong class="{% if bs.outstanding > 0 %}text-danger{% endif %}">
+                        ${{ '{:,.0f}'.format(bs.outstanding) }}
+                    </strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Remaining</small>
+                    <strong class="{% if bs.remaining < 0 %}text-danger{% else %}text-primary{% endif %}">
+                        ${{ '{:,.0f}'.format(bs.remaining) }}
+                    </strong>
+                </div>
+            </div>
+        </div>
+        <div class="mt-3">
+            <a href="{{ url_for('jobcosting.progress_bill', account_id=bs.analytic_id) }}"
+               class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-plus-circle"></i> Create Next Progress Bill
+            </a>
+            <small class="text-muted ms-2">
+                {{ bs.progress_bill_count }} posted invoice{{ 's' if bs.progress_bill_count != 1 else '' }} on this job.
+            </small>
+        </div>
+    </div>
+    {% endif %}
+
     {# Section 3: Item table — read-only #}
     <div class="form-section">
         <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">Items</h6>
@@ -359,6 +446,38 @@
    ════════════════════════════════════════════════════════════════════════════ #}
 <form method="POST" enctype="multipart/form-data" class="invoice-form" id="invoiceForm">
     <input type="hidden" name="action" id="actionField" value="draft">
+
+    {# Import from Sales Order — invoices only #}
+    {% if move_type == 'invoice' and sales_orders %}
+    <div class="form-section" style="background: #f1f5f9;">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold">
+                    <i class="bi bi-box-arrow-in-down"></i> From Sales Order
+                    <span class="text-muted fw-normal">(optional — pre-fills customer &amp; job)</span>
+                </label>
+                <select id="soPicker" class="form-select" data-searchable>
+                    <option value="">— Pick a sales order to import —</option>
+                    {% for so in sales_orders %}
+                    <option value="{{ so.id }}" data-name="{{ so.name }}">
+                        {{ so.name }} &middot; {{ so.partner_name }} &middot; ${{ '{:,.0f}'.format(so.amount_total or 0) }}
+                        {% if so.invoice_status == 'invoiced' %} &middot; fully invoiced{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted" id="soPickerHelp">
+                    Selecting an SO fills Customer, Job (Analytic), and Order Number.
+                    Use this for progress billing against an existing contract.
+                </small>
+            </div>
+            <div class="col-md-4 text-end">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="soClearBtn">
+                    <i class="bi bi-x-circle"></i> Clear
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     {# Section 1: Party + Job #}
     <div class="form-section">
@@ -831,6 +950,72 @@ function recomputeDueDate() {
 }
 
 document.addEventListener('DOMContentLoaded', calcTotal);
+
+/* ── Import-from-Sales-Order picker ──────────────────────────────────────
+ * When the user picks an SO, we AJAX its detail and assign the resulting
+ * customer, analytic, and reference onto the matching form selects. Works
+ * with both native <select>s and Tom Select widgets (we dispatch 'change'
+ * events + call refreshSearchableSelect where needed).
+ */
+(function() {
+    var picker = document.getElementById('soPicker');
+    if (!picker) return;
+    var clearBtn = document.getElementById('soClearBtn');
+    var helpEl = document.getElementById('soPickerHelp');
+
+    function setSelectValue(nameAttr, value) {
+        var sel = document.querySelector('[name="' + nameAttr + '"]');
+        if (!sel) return;
+        if (sel.tomselect) {
+            sel.tomselect.setValue(value || '', true);
+        } else {
+            sel.value = value || '';
+        }
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function setText(nameAttr, value) {
+        var inp = document.querySelector('[name="' + nameAttr + '"]');
+        if (inp) inp.value = value || '';
+    }
+
+    picker.addEventListener('change', function() {
+        var soId = picker.value;
+        if (!soId) return;
+        if (helpEl) helpEl.textContent = 'Loading sales order…';
+        fetch('/accounting/api/sale-order/' + encodeURIComponent(soId))
+            .then(function(r) {
+                if (!r.ok) throw new Error('Sales order not found');
+                return r.json();
+            })
+            .then(function(data) {
+                if (data.partner_id) setSelectValue('partner_id', String(data.partner_id));
+                if (data.analytic_id) setSelectValue('analytic_id', String(data.analytic_id));
+                if (data.name) setText('ref', data.name);
+                if (helpEl) {
+                    helpEl.innerHTML =
+                        'Imported <strong>' + data.name + '</strong> · ' +
+                        (data.partner_name || '') + ' · $' +
+                        Number(data.amount_total || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) +
+                        '. Add your progress-billing line below.';
+                }
+            })
+            .catch(function(err) {
+                if (helpEl) helpEl.textContent = 'Error loading SO: ' + err.message;
+            });
+    });
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            if (picker.tomselect) picker.tomselect.clear(true); else picker.value = '';
+            if (helpEl) {
+                helpEl.textContent =
+                    'Selecting an SO fills Customer, Job (Analytic), and Order Number. ' +
+                    'Use this for progress billing against an existing contract.';
+            }
+        });
+    }
+})();
 </script>
 {% endif %}
 {% endblock %}

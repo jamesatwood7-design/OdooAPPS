@@ -220,6 +220,33 @@ def bill_list():
 # Transactions
 # ---------------------------------------------------------------------------
 
+def _pick_dominant_analytic(invoice_lines):
+    """Given an invoice's invoice_lines (each with analytic_distribution),
+    return the analytic account ID that carries the largest attributed
+    dollar value. Matches the logic used when pre-filling Create Invoice
+    from a Sales Order so the two surfaces agree.
+    """
+    totals = {}
+    for line in invoice_lines or []:
+        dist = line.get('analytic_distribution') or {}
+        if not isinstance(dist, dict):
+            continue
+        amount = line.get('price_subtotal', 0) or 0
+        for key, pct in dist.items():
+            for raw in str(key).split(','):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    aid = int(raw)
+                except (ValueError, TypeError):
+                    continue
+                totals[aid] = totals.get(aid, 0) + amount * (pct or 0) / 100.0
+    if not totals:
+        return None
+    return max(totals, key=totals.get)
+
+
 def _handle_move_create(kind, move=None):
     """Shared POST/GET handler for create AND edit of invoices and bills.
 
@@ -320,6 +347,10 @@ def _handle_move_create(kind, move=None):
     else:
         title = 'Create Customer Invoice' if is_invoice else 'Create Vendor Bill'
 
+    # Only sales orders are relevant on customer invoices — bills pull from
+    # purchase orders (not implemented here yet).
+    sales_orders = transactions.get_open_sales_orders(odoo) if is_invoice else []
+
     return render_template(
         'accounting/create_move.html',
         move_type=kind,
@@ -336,8 +367,25 @@ def _handle_move_create(kind, move=None):
         taxes=transactions.get_taxes(odoo, 'sale' if is_invoice else 'purchase'),
         payment_terms=transactions.get_payment_terms(odoo),
         salespersons=transactions.get_salespersons(odoo),
+        sales_orders=sales_orders,
         today=date.today().isoformat(),
     )
+
+
+@bp.route('/api/sale-order/<int:so_id>')
+@permission_required('accounting', 'read')
+def api_sale_order(so_id):
+    """JSON detail for a single SO — used by the Create Invoice form's
+    "From Sales Order" picker to pre-fill customer and job."""
+    odoo = current_app.odoo
+    try:
+        data = transactions.get_sale_order_detail(odoo, so_id)
+        if not data:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(data)
+    except Exception as e:
+        current_app.logger.warning('SO fetch failed: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/move/<int:move_id>/edit', methods=['GET', 'POST'])
@@ -513,6 +561,24 @@ def view_move(move_id):
     is_invoice = move.get('move_type') in ('out_invoice', 'out_refund')
     kind = 'invoice' if is_invoice else 'bill'
 
+    # If this invoice is tied to a job, compute the progress-billing context
+    # so the same Contract/Billed/Paid/Outstanding/Remaining card appears here.
+    billing_summary = None
+    if is_invoice:
+        analytic_id = _pick_dominant_analytic(move.get('invoice_lines') or [])
+        if analytic_id:
+            try:
+                from jobcosting import services as jc_services
+                billing_summary = jc_services.get_billing_summary(
+                    odoo, analytic_id,
+                )
+                billing_summary['analytic_id'] = analytic_id
+            except Exception as bs_err:
+                current_app.logger.warning(
+                    'Billing summary failed for move %s: %s',
+                    move_id, bs_err,
+                )
+
     return render_template(
         'accounting/create_move.html',
         mode='view',
@@ -531,6 +597,8 @@ def view_move(move_id):
         taxes=[],
         payment_terms=[],
         salespersons=[],
+        sales_orders=[],
+        billing_summary=billing_summary,
         today=date.today().isoformat(),
     )
 
