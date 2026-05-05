@@ -1,171 +1,1047 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-{% if move_type == 'invoice' %}receipt{% else %}file-earmark-text{% endif %}"></i> {{ title }}</h2>
-</div>
+{# ── Mode helpers ─────────────────────────────────────────────────────────── #}
+{% set mode     = mode|default('create') %}
+{% set is_view  = (mode == 'view') %}
+{% set is_edit  = (mode == 'edit') %}
 
-<form method="POST">
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">{% if move_type == 'invoice' %}Customer{% else %}Vendor{% endif %} <span class="text-danger">*</span></label>
-                    <select name="partner_id" class="form-select" required>
-                        <option value="">-- Select --</option>
-                        {% for p in partners %}
-                            <option value="{{ p.id }}">{{ p.name }}</option>
+{# ── Pre-fill helpers (used in edit + view) ──────────────────────────────── #}
+{% set existing_partner_id  = move.partner_id[0]                  if move and move.partner_id                  else None %}
+{% set existing_user_id     = move.user_id[0]                     if move and move.user_id                     else None %}
+{% set existing_term_id     = move.invoice_payment_term_id[0]     if move and move.invoice_payment_term_id     else None %}
+{% set existing_analytic_id = None %}
+{% if move and move.invoice_lines %}
+    {% set first_line = move.invoice_lines[0] if move.invoice_lines else None %}
+    {% if first_line %}
+        {% set first_dist = first_line.analytic_distribution if first_line.analytic_distribution is mapping else None %}
+        {% if first_dist and first_dist | length == 1 %}
+            {% set existing_analytic_id = first_dist | list | first %}
+        {% endif %}
+    {% endif %}
+{% endif %}
+{% set invoice_date_value = (move.invoice_date       if move and move.invoice_date       else today) %}
+{% set due_date_value     = (move.invoice_date_due   if move and move.invoice_date_due   else '') %}
+{% set name_value         = (move.name               if move and move.name and move.name != '/' else '') %}
+{% set ref_value          = (move.ref                if move and move.ref                else '') %}
+
+{# ── Analytic display name helper (view mode) ────────────────────────────── #}
+{% set analytic_display = '' %}
+{% if existing_analytic_id %}
+    {% for a in analytics %}
+        {% if a.id | string == existing_analytic_id | string %}
+            {% if a.code %}{% set analytic_display = '[' + a.code + '] ' + a.name %}{% else %}{% set analytic_display = a.name %}{% endif %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+
+{% block content %}
+
+{# ════════════════════════════════════════════════════════════════════════════
+   VIEW MODE — read-only display that mirrors the create-form layout
+   ════════════════════════════════════════════════════════════════════════════ #}
+{% if is_view %}
+<div class="invoice-form view-mode" style="padding-bottom: 80px;">
+
+    {# Section 1: Party + Job #}
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <small class="form-label">{% if move_type == 'invoice' %}Customer{% else %}Vendor{% endif %}</small>
+                <div class="form-control-plaintext fw-semibold">{{ move.partner_name or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">Job (Analytic)</small>
+                <div class="form-control-plaintext">{{ analytic_display or '—' }}</div>
+            </div>
+        </div>
+    </div>
+
+    {# Section 2: Metadata grid #}
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <small class="form-label">{% if move_type == 'invoice' %}Invoice #{% else %}Bill #{% endif %}</small>
+                <div class="form-control-plaintext fw-semibold">{{ name_value or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">Order Number</small>
+                <div class="form-control-plaintext">{{ ref_value or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">Salesperson</small>
+                <div class="form-control-plaintext">{{ move.salesperson_name or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">{% if move_type == 'invoice' %}Invoice{% else %}Bill{% endif %} Date</small>
+                <div class="form-control-plaintext">{{ invoice_date_value or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">Terms</small>
+                <div class="form-control-plaintext">{{ move.payment_term_name or '—' }}</div>
+            </div>
+            <div class="col-md-4">
+                <small class="form-label">Due Date</small>
+                <div class="form-control-plaintext">{{ due_date_value or '—' }}</div>
+            </div>
+            {% if prefill_subject %}
+            <div class="col-12">
+                <small class="form-label">Subject</small>
+                <div class="form-control-plaintext">{{ prefill_subject }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Progress Billing Summary — only when this invoice is tied to a job #}
+    {% if billing_summary and move_type == 'invoice' %}
+    {% set bs = billing_summary %}
+    <div class="form-section" style="border-left: 4px solid #0dcaf0;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">
+                    <i class="bi bi-receipt"></i> Progress Billing Summary
+                </h6>
+                {% if bs.analytic_name %}
+                <div class="fw-semibold mt-1">
+                    <i class="bi bi-briefcase text-info"></i>
+                    {% if bs.analytic_code %}<span class="text-muted">{{ bs.analytic_code }}</span> &middot; {% endif %}
+                    {{ bs.analytic_name }}
+                </div>
+                {% endif %}
+            </div>
+            <a href="{{ url_for('jobcosting.job_detail', account_id=bs.analytic_id) }}"
+               class="btn btn-sm btn-outline-info">
+                <i class="bi bi-arrow-up-right-square"></i> Open Job
+            </a>
+        </div>
+        {% if move.state == 'draft' %}
+        <div class="alert alert-warning small py-2 mb-3">
+            <i class="bi bi-info-circle"></i> This invoice is still a draft —
+            the numbers below do not yet include it. They'll update as soon
+            as it's posted.
+        </div>
+        {% endif %}
+        {% set contract_pct = (bs.billed / bs.contract * 100) if bs.contract else 0 %}
+        {% if contract_pct > 100 %}{% set contract_pct = 100 %}{% endif %}
+        {% set paid_pct = (bs.paid / bs.contract * 100) if bs.contract else 0 %}
+        {% if paid_pct > 100 %}{% set paid_pct = 100 %}{% endif %}
+        {% if bs.contract %}
+        <div class="progress mb-3" style="height: 20px;">
+            <div class="progress-bar bg-success" style="width: {{ paid_pct }}%"
+                 title="Paid by customer">
+                {% if paid_pct > 8 %}{{ '{:.0f}'.format(paid_pct) }}% Paid{% endif %}
+            </div>
+            {% set unpaid_width = contract_pct - paid_pct %}
+            {% if unpaid_width > 0 %}
+            <div class="progress-bar bg-warning" style="width: {{ unpaid_width }}%"
+                 title="Billed but not yet paid">
+                {% if unpaid_width > 8 %}{{ '{:.0f}'.format(unpaid_width) }}% Unpaid{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="row row-cols-2 row-cols-md-5 g-2">
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Contract</small>
+                    <strong>${{ '{:,.0f}'.format(bs.contract) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Billed to Date</small>
+                    <strong>${{ '{:,.0f}'.format(bs.billed) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Paid</small>
+                    <strong class="text-success">${{ '{:,.0f}'.format(bs.paid) }}</strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Outstanding</small>
+                    <strong class="{% if bs.outstanding > 0 %}text-danger{% endif %}">
+                        ${{ '{:,.0f}'.format(bs.outstanding) }}
+                    </strong>
+                </div>
+            </div>
+            <div class="col">
+                <div class="border rounded p-2 bg-light">
+                    <small class="text-muted d-block" style="font-size:0.7rem;">Remaining</small>
+                    <strong class="{% if bs.remaining < 0 %}text-danger{% else %}text-primary{% endif %}">
+                        ${{ '{:,.0f}'.format(bs.remaining) }}
+                    </strong>
+                </div>
+            </div>
+        </div>
+        <div class="mt-3">
+            <a href="{{ url_for('jobcosting.progress_bill', account_id=bs.analytic_id) }}"
+               class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-plus-circle"></i> Create Next Progress Bill
+            </a>
+            <small class="text-muted ms-2">
+                {{ bs.progress_bill_count }} posted invoice{{ 's' if bs.progress_bill_count != 1 else '' }} on this job.
+            </small>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Section 3: Item table — read-only #}
+    <div class="form-section">
+        <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">Items</h6>
+        <div class="table-responsive">
+            <table class="table table-sm invoice-lines mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:30%">Item Details</th>
+                        <th>Description</th>
+                        <th class="text-end" style="width:80px">Qty</th>
+                        <th class="text-end" style="width:110px">Rate</th>
+                        <th class="text-end" style="width:90px">Disc %</th>
+                        <th style="width:160px">Tax</th>
+                        <th class="text-end" style="width:120px">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set product_lines = [] %}
+                    {% if move and move.invoice_lines %}
+                        {% for line in move.invoice_lines %}
+                            {% if not line.display_type %}
+                                {% set _ = product_lines.append(line) %}
+                            {% endif %}
                         {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Date</label>
-                    <input type="date" name="invoice_date" class="form-control" value="{{ today }}">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Job (Analytic)</label>
-                    <select name="analytic_id" class="form-select">
-                        <option value="">-- None --</option>
-                        {% for a in analytics %}
-                            <option value="{{ a.id }}">{% if a.code %}[{{ a.code }}] {% endif %}{{ a.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Reference</label>
-                    <input type="text" name="ref" class="form-control" placeholder="PO #, etc.">
+                    {% endif %}
+                    {% if product_lines %}
+                    {% for line in product_lines %}
+                    <tr>
+                        <td class="fw-semibold">{{ line.product_name or '—' }}</td>
+                        <td>{{ line.name or '—' }}</td>
+                        <td class="text-end">{{ line.quantity }}</td>
+                        <td class="text-end">${{ '%.2f' | format(line.price_unit or 0) }}</td>
+                        <td class="text-end">{% if line.discount %}{{ '%.1f' | format(line.discount) }}%{% else %}—{% endif %}</td>
+                        <td>{{ line.tax_label or 'No Tax' }}</td>
+                        <td class="text-end fw-semibold">${{ '%.2f' | format(line.price_subtotal or 0) }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr><td colspan="7" class="text-muted text-center py-3">No line items.</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# Section 4: Notes + Totals #}
+    <div class="form-section">
+        <div class="row g-4">
+            <div class="col-md-7">
+                {% if prefill_customer_notes %}
+                <small class="form-label fw-semibold">Customer Notes</small>
+                <div class="form-control-plaintext" style="white-space: pre-wrap;">{{ prefill_customer_notes }}</div>
+                {% else %}
+                <div></div>
+                {% endif %}
+            </div>
+            <div class="col-md-5">
+                <div class="totals-panel">
+                    <div class="totals-row">
+                        <span class="totals-label">Sub Total</span>
+                        <span class="totals-value">${{ '%.2f' | format(move.amount_untaxed or 0) }}</span>
+                    </div>
+                    <div class="totals-row">
+                        <span class="totals-label">Tax</span>
+                        <span class="totals-value">${{ '%.2f' | format(move.amount_tax or 0) }}</span>
+                    </div>
+                    <div class="totals-row grand">
+                        <span class="totals-label">Total ($)</span>
+                        <span class="totals-value">${{ '%.2f' | format(move.amount_total or 0) }}</span>
+                    </div>
+                    <div class="totals-row" style="margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                        <span class="totals-label">Amount Due</span>
+                        <span class="totals-value {% if move.amount_residual %}text-danger{% else %}text-success{% endif %}">
+                            ${{ '%.2f' | format(move.amount_residual or 0) }}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between">
-            <h5 class="mb-0">Lines</h5>
-            <button type="button" class="btn btn-sm btn-outline-success" onclick="addLine()">
-                <i class="bi bi-plus"></i> Add Line
-            </button>
+    {# Section 5: Terms + Attachments #}
+    <div class="form-section">
+        <div class="row g-4">
+            {% if prefill_terms %}
+            <div class="col-md-7">
+                <small class="form-label fw-semibold">Terms &amp; Conditions</small>
+                <div class="form-control-plaintext" style="white-space: pre-wrap;">{{ prefill_terms }}</div>
+            </div>
+            <div class="col-md-5">
+            {% else %}
+            <div class="col-12">
+            {% endif %}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="form-label fw-semibold mb-0">
+                        <i class="bi bi-paperclip"></i> Attachments
+                    </small>
+                    <span class="badge bg-secondary">{{ attachments | length }}</span>
+                </div>
+                {% set has_main = attachments | selectattr('is_main') | list | length > 0 %}
+                {% if has_main %}
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle"></i>
+                    The <strong>Main PDF</strong> is what Odoo sends to the customer.
+                    Delete it to force a fresh regeneration on the next send.
+                </div>
+                {% endif %}
+                {% if attachments %}
+                <div class="list-group list-group-flush mb-3">
+                    {% for att in attachments %}
+                    <div class="list-group-item px-2">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="flex-grow-1 min-w-0">
+                                {% if att.is_pdf %}<i class="bi bi-file-earmark-pdf text-danger"></i>
+                                {% elif att.is_image %}<i class="bi bi-file-earmark-image text-primary"></i>
+                                {% else %}<i class="bi bi-file-earmark text-secondary"></i>{% endif %}
+                                <span class="ms-1 fw-semibold">{{ att.name }}</span>
+                                {% if att.is_main %}<span class="badge bg-primary ms-1">Main PDF</span>{% endif %}
+                                <br>
+                                <small class="text-muted">{{ att.size_display }} &middot; {{ att.create_date[:10] if att.create_date else '' }}</small>
+                            </div>
+                            <div class="btn-group btn-group-sm flex-shrink-0">
+                                {% if att.is_previewable %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
+                                   target="_blank" rel="noopener"
+                                   class="btn btn-outline-secondary" title="Preview">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                {% endif %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id, download=1) }}"
+                                   class="btn btn-outline-primary" title="Download">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                {% if can_write %}
+                                <form method="POST"
+                                      action="{{ url_for('accounting.delete_move_attachment', move_id=move.id, attachment_id=att.id) }}"
+                                      onsubmit="return confirm('{% if att.is_main %}Delete the Main PDF? Odoo will regenerate it on the next send.{% else %}Delete this attachment?{% endif %}');"
+                                      class="d-inline">
+                                    <button type="submit" class="btn btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted small mb-3">No attachments yet.</p>
+                {% endif %}
+                {% if can_write %}
+                <form method="POST"
+                      action="{{ url_for('accounting.upload_attachment', move_id=move.id) }}"
+                      enctype="multipart/form-data">
+                    <div class="input-group input-group-sm">
+                        <input type="file" name="file" class="form-control" required
+                               accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.csv">
+                        <button type="submit" class="btn btn-outline-primary">
+                            <i class="bi bi-upload"></i> Upload
+                        </button>
+                    </div>
+                    <small class="text-muted">PDF, images, or documents</small>
+                </form>
+                {% endif %}
+            </div>
         </div>
-        <div class="card-body p-0">
-            <table class="table table-sm mb-0" style="font-size: 0.9rem;">
-                <thead class="table-light">
+    </div>
+
+    {# Section 6: Journal Items (collapsible accounting detail) #}
+    {% if move and move.journal_lines %}
+    <div class="form-section">
+        <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-1"
+                type="button" data-bs-toggle="collapse" data-bs-target="#journalItems"
+                aria-expanded="false">
+            <i class="bi bi-chevron-right toggle-icon" style="transition: transform 0.2s;"></i>
+            <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">
+                Journal Items
+            </h6>
+        </button>
+        <div class="collapse" id="journalItems">
+            <div class="table-responsive mt-3">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Account</th>
+                            <th>Label</th>
+                            <th class="text-end">Debit</th>
+                            <th class="text-end">Credit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in move.journal_lines %}
+                        <tr>
+                            <td>
+                                {% if line.account_id is iterable and line.account_id is not string %}
+                                    {{ line.account_id[1] }}
+                                {% else %}
+                                    {{ line.account_id }}
+                                {% endif %}
+                            </td>
+                            <td>{{ line.name or '—' }}</td>
+                            <td class="text-end">{% if line.debit %} ${{ '%.2f' | format(line.debit) }}{% endif %}</td>
+                            <td class="text-end">{% if line.credit %} ${{ '%.2f' | format(line.credit) }}{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Sticky footer — view mode #}
+    <div class="invoice-footer">
+        <div class="d-flex align-items-center gap-2">
+            {% if move.state == 'posted' %}<span class="badge bg-success">Posted</span>
+            {% elif move.state == 'draft'  %}<span class="badge bg-secondary">Draft</span>
+            {% elif move.state == 'cancel' %}<span class="badge bg-dark">Cancelled</span>{% endif %}
+            {% if move.payment_state == 'paid'       %}<span class="badge bg-success">Paid</span>
+            {% elif move.payment_state == 'partial'  %}<span class="badge bg-warning text-dark">Partial</span>
+            {% elif move.payment_state == 'not_paid' %}<span class="badge bg-danger">Unpaid</span>
+            {% elif move.payment_state == 'in_payment' %}<span class="badge bg-info">In Payment</span>{% endif %}
+            <strong class="ms-2">${{ '%.2f' | format(move.amount_total or 0) }}</strong>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('accounting.invoice_list' if move_type == 'invoice' else 'accounting.bill_list') }}"
+               class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+            {% if can_write and move.state == 'draft' %}
+            <a href="{{ url_for('accounting.edit_move', move_id=move.id) }}"
+               class="btn btn-outline-primary">
+                <i class="bi bi-pencil"></i> Edit
+            </a>
+            <form method="POST" action="{{ url_for('accounting.post_move', move_id=move.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-success"
+                        onclick="return confirm('Post this transaction?')">
+                    <i class="bi bi-check-circle"></i> Post
+                </button>
+            </form>
+            {% endif %}
+            {% if can_write and move.state == 'posted' %}
+            <form method="POST" action="{{ url_for('accounting.reset_move_to_draft', move_id=move.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-outline-warning"
+                        onclick="return confirm('Reset to draft? This will unpost the transaction.')">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset to Draft
+                </button>
+            </form>
+            {% if move.payment_state in ('not_paid', 'partial') and move.amount_residual %}
+            <a href="{{ url_for('accounting.create_payment', move_id=move.id) }}"
+               class="btn btn-primary">
+                <i class="bi bi-cash-stack"></i> Register Payment
+            </a>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% else %}
+{# ════════════════════════════════════════════════════════════════════════════
+   EDIT / CREATE MODE — editable form
+   ════════════════════════════════════════════════════════════════════════════ #}
+<form method="POST" enctype="multipart/form-data" class="invoice-form" id="invoiceForm">
+    <input type="hidden" name="action" id="actionField" value="draft">
+
+    {# Import from Sales Order — invoices only #}
+    {% if move_type == 'invoice' and sales_orders %}
+    <div class="form-section" style="background: #f1f5f9;">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold">
+                    <i class="bi bi-box-arrow-in-down"></i> From Sales Order
+                    <span class="text-muted fw-normal">(optional — pre-fills customer &amp; job)</span>
+                </label>
+                <select id="soPicker" class="form-select" data-searchable>
+                    <option value="">— Pick a sales order to import —</option>
+                    {% for so in sales_orders %}
+                    <option value="{{ so.id }}" data-name="{{ so.name }}">
+                        {{ so.name }}
+                        {%- if so.analytic_name %} &middot;
+                            {%- if so.analytic_code %} [{{ so.analytic_code }}]{% endif %} {{ so.analytic_name }}
+                        {%- endif %} &middot; {{ so.partner_name }} &middot; ${{ '{:,.0f}'.format(so.amount_total or 0) }}
+                        {%- if so.invoice_status == 'invoiced' %} &middot; fully invoiced{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted" id="soPickerHelp">
+                    Selecting an SO fills Customer, Job (Analytic), and Order Number.
+                    Use this for progress billing against an existing contract.
+                </small>
+            </div>
+            <div class="col-md-4 text-end">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="soClearBtn">
+                    <i class="bi bi-x-circle"></i> Clear
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Section 1: Party + Job #}
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold">
+                    {% if move_type == 'invoice' %}Customer{% else %}Vendor{% endif %}
+                    <span class="text-danger">*</span>
+                </label>
+                <select name="partner_id" class="form-select" required>
+                    <option value="">— Select —</option>
+                    {% for p in partners %}
+                    <option value="{{ p.id }}" {% if existing_partner_id == p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Job (Analytic)</label>
+                <select name="analytic_id" class="form-select">
+                    <option value="">— None —</option>
+                    {% for a in analytics %}
+                    <option value="{{ a.id }}"
+                            {% if existing_analytic_id and existing_analytic_id | string == a.id | string %}selected{% endif %}>
+                        {% if a.code %}[{{ a.code }}] {% endif %}{{ a.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    {# Section 2: Metadata grid #}
+    <div class="form-section">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">{% if move_type == 'invoice' %}Invoice #{% else %}Bill #{% endif %}</label>
+                <input type="text" name="name" class="form-control"
+                       value="{{ name_value }}" placeholder="Auto-number on post">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Order Number</label>
+                <input type="text" name="ref" class="form-control"
+                       value="{{ ref_value }}" placeholder="PO #, SO #, etc.">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Salesperson</label>
+                <select name="user_id" class="form-select">
+                    <option value="">— None —</option>
+                    {% for u in salespersons %}
+                    <option value="{{ u.id }}" {% if existing_user_id == u.id %}selected{% endif %}>{{ u.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">{% if move_type == 'invoice' %}Invoice{% else %}Bill{% endif %} Date</label>
+                <input type="date" name="invoice_date" class="form-control"
+                       value="{{ invoice_date_value }}" id="invoiceDate" onchange="recomputeDueDate()">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Terms</label>
+                <select name="payment_term_id" class="form-select" id="termsSelect" onchange="recomputeDueDate()">
+                    <option value="">— None —</option>
+                    {% for t in payment_terms %}
+                    <option value="{{ t.id }}" data-name="{{ t.name }}"
+                            {% if existing_term_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Due Date</label>
+                <input type="date" name="date_due" class="form-control"
+                       value="{{ due_date_value }}" id="dueDate">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Subject</label>
+                <input type="text" name="subject" class="form-control"
+                       value="{{ prefill_subject or '' }}"
+                       placeholder="Let your customer know what this is for">
+            </div>
+        </div>
+    </div>
+
+    {# Section 3: Item table #}
+    <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0 text-uppercase text-muted fw-semibold" style="letter-spacing:0.5px; font-size:0.72rem;">Item Table</h6>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm invoice-lines mb-0">
+                <thead>
                     <tr>
-                        <th style="width: 25%">Product</th>
+                        <th style="width:30%">Item Details</th>
                         <th>Description</th>
-                        <th style="width:80px">Qty</th>
-                        <th style="width:120px">Unit Price</th>
+                        <th class="text-end" style="width:80px">Qty</th>
+                        <th class="text-end" style="width:110px">Rate</th>
+                        <th class="text-end" style="width:90px">Disc %</th>
                         <th style="width:160px">Tax</th>
-                        <th style="width:110px">Subtotal</th>
-                        <th style="width:40px"></th>
+                        <th class="text-end" style="width:120px">Amount</th>
+                        <th style="width:36px"></th>
                     </tr>
                 </thead>
                 <tbody id="linesBody">
+                    {# In edit mode: render existing lines pre-filled #}
+                    {% if move and move.invoice_lines %}
+                    {% for line in move.invoice_lines %}{% if not line.display_type %}
+                    {% set i = loop.index0 %}
                     <tr>
-                        <td><select name="line_product_0" class="form-select form-select-sm" onchange="onProductSelect(this, 0)">
-                            <option value="">-- No Product --</option>
-                            {% for p in products %}<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}">{{ p.display_name }}</option>{% endfor %}
-                        </select></td>
+                        <td>
+                            <select name="line_product_{{ i }}" class="form-select form-select-sm"
+                                    onchange="onProductSelect(this, {{ i }})">
+                                <option value="">— No Product —</option>
+                                {% for p in products %}
+                                <option value="{{ p.id }}"
+                                        data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}"
+                                        data-name="{{ p.name | e }}"
+                                        data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}"
+                                        {% if line.product_id and line.product_id[0] == p.id %}selected{% endif %}>
+                                    {{ p.display_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><input type="text" name="line_name_{{ i }}" class="form-control form-control-sm"
+                                   value="{{ line.name or '' }}" placeholder="Description"></td>
+                        <td><input type="number" name="line_qty_{{ i }}" class="form-control form-control-sm text-end"
+                                   value="{{ line.quantity }}" step="any" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_price_{{ i }}" class="form-control form-control-sm text-end"
+                                   value="{{ line.price_unit }}" step="0.01" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_discount_{{ i }}" class="form-control form-control-sm text-end"
+                                   value="{{ line.discount or '' }}" step="0.01" placeholder="0" oninput="calcTotal()"></td>
+                        <td>
+                            <select name="line_tax_{{ i }}" class="form-select form-select-sm" onchange="calcTotal()">
+                                <option value="">No Tax</option>
+                                {% for t in taxes %}
+                                <option value="{{ t.id }}" data-amount="{{ t.amount }}"
+                                        {% if line.tax_ids and t.id in line.tax_ids %}selected{% endif %}>
+                                    {{ t.display_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-end line-subtotal fw-semibold align-middle">
+                            ${{ '%.2f' | format(line.price_subtotal or 0) }}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-link text-danger p-0"
+                                    onclick="this.closest('tr').remove(); calcTotal()">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endif %}{% endfor %}
+                    {% else %}
+                    {# Create mode: single empty row #}
+                    <tr>
+                        <td>
+                            <select name="line_product_0" class="form-select form-select-sm"
+                                    onchange="onProductSelect(this, 0)">
+                                <option value="">— No Product —</option>
+                                {% for p in products %}
+                                <option value="{{ p.id }}"
+                                        data-price="{{ p.list_price if move_type == 'invoice' else p.standard_price }}"
+                                        data-name="{{ p.name | e }}"
+                                        data-taxes="{{ p.taxes_id if move_type == 'invoice' else p.supplier_taxes_id }}">
+                                    {{ p.display_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
                         <td><input type="text" name="line_name_0" class="form-control form-control-sm" placeholder="Description"></td>
-                        <td><input type="number" name="line_qty_0" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>
-                        <td><input type="number" name="line_price_0" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>
-                        <td><select name="line_tax_0" class="form-select form-select-sm">
-                            <option value="">No Tax</option>
-                            {% for t in taxes %}<option value="{{ t.id }}">{{ t.display_name }}</option>{% endfor %}
-                        </select></td>
-                        <td class="text-end line-subtotal fw-bold align-middle">$0.00</td>
-                        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>
+                        <td><input type="number" name="line_qty_0" class="form-control form-control-sm text-end" value="1" step="any" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_price_0" class="form-control form-control-sm text-end" step="0.01" oninput="calcTotal()"></td>
+                        <td><input type="number" name="line_discount_0" class="form-control form-control-sm text-end" step="0.01" placeholder="0" oninput="calcTotal()"></td>
+                        <td>
+                            <select name="line_tax_0" class="form-select form-select-sm" onchange="calcTotal()">
+                                <option value="">No Tax</option>
+                                {% for t in taxes %}
+                                <option value="{{ t.id }}" data-amount="{{ t.amount }}">{{ t.display_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-end line-subtotal fw-semibold align-middle">$0.00</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-link text-danger p-0"
+                                    onclick="this.closest('tr').remove(); calcTotal()">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
                     </tr>
+                    {% endif %}
                 </tbody>
-                <tfoot>
-                    <tr class="fw-bold fs-6">
-                        <td colspan="5" class="text-end">Subtotal (before tax):</td>
-                        <td class="text-end" id="grandTotal">$0.00</td>
-                        <td></td>
-                    </tr>
-                </tfoot>
             </table>
+        </div>
+        <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addLine()">
+                <i class="bi bi-plus-circle"></i> Add New Row
+            </button>
         </div>
     </div>
 
-    <div class="d-flex justify-content-end gap-2">
-        <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> Create</button>
+    {# Section 4: Notes + Totals #}
+    <div class="form-section">
+        <div class="row g-4">
+            <div class="col-md-7">
+                <label class="form-label fw-semibold">Customer Notes</label>
+                <textarea name="customer_notes" class="form-control" rows="3"
+                          placeholder="Thanks for your business.">{{ prefill_customer_notes or '' }}</textarea>
+                <small class="text-muted">Will be displayed on the invoice.</small>
+            </div>
+            <div class="col-md-5">
+                <div class="totals-panel">
+                    <div class="totals-row">
+                        <span class="totals-label">Sub Total</span>
+                        <span class="totals-value" id="subTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row">
+                        <span class="totals-label">Discount</span>
+                        <span class="totals-value" id="discountTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row">
+                        <span class="totals-label">Tax</span>
+                        <span class="totals-value" id="taxTotal">$0.00</span>
+                    </div>
+                    <div class="totals-row grand">
+                        <span class="totals-label">Total ($)</span>
+                        <span class="totals-value" id="grandTotal">$0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Section 5: Terms + Attach #}
+    <div class="form-section">
+        <div class="row g-4">
+            <div class="col-md-7">
+                <label class="form-label fw-semibold">Terms &amp; Conditions</label>
+                <textarea name="terms" class="form-control" rows="3"
+                          placeholder="Payment terms, late fees, etc.">{{ prefill_terms or '' }}</textarea>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label fw-semibold">Attach File(s)</label>
+                <input type="file" name="attachments" class="form-control" multiple
+                       accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.csv">
+                <small class="text-muted">You can upload multiple files (PDF, images, documents).</small>
+            </div>
+        </div>
+    </div>
+
+    {# Sticky footer — edit/create mode #}
+    <div class="invoice-footer">
+        <div class="invoice-footer-summary">
+            <span class="text-muted small">Total Amount</span>
+            <strong class="ms-2" id="footerTotal">$0.00</strong>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('accounting.invoice_list' if move_type == 'invoice' else 'accounting.bill_list') }}"
+               class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-outline-primary"
+                    onclick="document.getElementById('actionField').value='draft'">
+                Save as Draft
+            </button>
+            <button type="submit" class="btn btn-primary"
+                    onclick="document.getElementById('actionField').value='send'">
+                Save and Post
+            </button>
+        </div>
     </div>
 </form>
+{% endif %}
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.invoice-form { padding-bottom: 80px; }
+
+.form-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+.form-section .form-label {
+    font-size: 0.82rem;
+    color: #475569;
+    margin-bottom: 4px;
+    display: block;
+}
+.form-section .form-label.fw-semibold { color: #334155; }
+
+/* View-mode: plain text display cells */
+.view-mode .form-control-plaintext {
+    font-size: 0.92rem;
+    color: #1e293b;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
+    min-height: 32px;
+}
+
+/* Item table */
+.invoice-lines th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.invoice-lines td {
+    vertical-align: middle;
+    padding: 6px 8px;
+}
+.invoice-lines .form-control-sm,
+.invoice-lines .form-select-sm { font-size: 0.85rem; }
+
+/* Totals panel */
+.totals-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+.totals-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+}
+.totals-row + .totals-row { border-top: 1px dashed #e2e8f0; }
+.totals-row .totals-label { color: #475569; font-size: 0.9rem; }
+.totals-row .totals-value { font-weight: 600; color: #0f172a; }
+.totals-row.grand {
+    margin-top: 6px;
+    border-top: 2px solid #334155 !important;
+    padding-top: 10px;
+}
+.totals-row.grand .totals-label,
+.totals-row.grand .totals-value { font-size: 1.05rem; color: #0f172a; }
+
+/* Sticky footer */
+.invoice-footer {
+    position: fixed;
+    bottom: 0;
+    left: var(--sidebar-width, 240px);
+    right: 0;
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
+    z-index: 900;
+    transition: left 0.2s ease;
+}
+.sidebar.collapsed ~ .main-content .invoice-footer {
+    left: var(--sidebar-collapsed-width, 64px);
+}
+@media (max-width: 991.98px) { .invoice-footer { left: 0; } }
+
+/* Collapse toggle icon rotation */
+#journalItems.show ~ button .toggle-icon,
+button[aria-expanded="true"] .toggle-icon { transform: rotate(90deg); }
+</style>
 {% endblock %}
 
 {% block extra_scripts %}
+{% if not is_view %}
 <script>
-var lineCount = 1;
+var lineCount = {{ move.invoice_lines | length if (move and move.invoice_lines) else 1 }};
 
-// Build options strings for dynamic rows
-var productOptions = '<option value="">-- No Product --</option>';
+var productOptions = '<option value="">— No Product —</option>';
 {% for p in products %}
-productOptions += '<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == "invoice" else p.standard_price }}" data-name="{{ p.name }}" data-taxes="{{ p.taxes_id if move_type == "invoice" else p.supplier_taxes_id }}">{{ p.display_name }}</option>';
+productOptions += '<option value="{{ p.id }}" data-price="{{ p.list_price if move_type == "invoice" else p.standard_price }}" data-name="{{ p.name | e }}" data-taxes="{{ p.taxes_id if move_type == "invoice" else p.supplier_taxes_id }}">{{ p.display_name | e }}</option>';
 {% endfor %}
 
 var taxOptions = '<option value="">No Tax</option>';
 {% for t in taxes %}
-taxOptions += '<option value="{{ t.id }}">{{ t.display_name }}</option>';
+taxOptions += '<option value="{{ t.id }}" data-amount="{{ t.amount }}">{{ t.display_name | e }}</option>';
 {% endfor %}
 
 function onProductSelect(sel, idx) {
     var opt = sel.options[sel.selectedIndex];
     if (!opt || !opt.value) return;
-
-    var price = opt.dataset.price || '';
-    var name = opt.dataset.name || '';
-    var taxes = opt.dataset.taxes || '';
-
     var row = sel.closest('tr');
-    var nameInput = row.querySelector('[name="line_name_' + idx + '"]');
+    var nameInput  = row.querySelector('[name="line_name_'  + idx + '"]');
     var priceInput = row.querySelector('[name="line_price_' + idx + '"]');
-    var taxSelect = row.querySelector('[name="line_tax_' + idx + '"]');
-
-    if (nameInput && !nameInput.value) nameInput.value = name;
-    if (priceInput && !priceInput.value) priceInput.value = parseFloat(price) || '';
-
-    // Try to auto-select the first tax from the product's default taxes
-    if (taxSelect && taxes) {
+    var taxSelect  = row.querySelector('[name="line_tax_'   + idx + '"]');
+    if (nameInput  && !nameInput.value)  nameInput.value  = opt.dataset.name  || '';
+    if (priceInput && !priceInput.value) priceInput.value = parseFloat(opt.dataset.price) || '';
+    if (taxSelect && opt.dataset.taxes) {
         try {
-            var taxIds = JSON.parse(taxes.replace(/'/g, '"'));
-            if (Array.isArray(taxIds) && taxIds.length > 0) {
+            var taxIds = JSON.parse(opt.dataset.taxes.replace(/'/g, '"'));
+            if (Array.isArray(taxIds) && taxIds.length) {
                 for (var i = 0; i < taxSelect.options.length; i++) {
                     if (parseInt(taxSelect.options[i].value) === taxIds[0]) {
-                        taxSelect.selectedIndex = i;
-                        break;
+                        taxSelect.selectedIndex = i; break;
                     }
                 }
             }
         } catch(e) {}
     }
-
     calcTotal();
 }
 
 function addLine() {
     var n = lineCount++;
     var tr = document.createElement('tr');
-    tr.innerHTML = '<td><select name="line_product_'+n+'" class="form-select form-select-sm" onchange="onProductSelect(this,'+n+')">'+productOptions+'</select></td>' +
-        '<td><input type="text" name="line_name_'+n+'" class="form-control form-control-sm" placeholder="Description"></td>' +
-        '<td><input type="number" name="line_qty_'+n+'" class="form-control form-control-sm" value="1" step="any" oninput="calcTotal()"></td>' +
-        '<td><input type="number" name="line_price_'+n+'" class="form-control form-control-sm" step="0.01" oninput="calcTotal()"></td>' +
-        '<td><select name="line_tax_'+n+'" class="form-select form-select-sm">'+taxOptions+'</select></td>' +
-        '<td class="text-end line-subtotal fw-bold align-middle">$0.00</td>' +
-        '<td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-trash"></i></button></td>';
+    tr.innerHTML =
+        '<td><select name="line_product_' + n + '" class="form-select form-select-sm" onchange="onProductSelect(this,' + n + ')">' + productOptions + '</select></td>' +
+        '<td><input type="text" name="line_name_' + n + '" class="form-control form-control-sm" placeholder="Description"></td>' +
+        '<td><input type="number" name="line_qty_' + n + '" class="form-control form-control-sm text-end" value="1" step="any" oninput="calcTotal()"></td>' +
+        '<td><input type="number" name="line_price_' + n + '" class="form-control form-control-sm text-end" step="0.01" oninput="calcTotal()"></td>' +
+        '<td><input type="number" name="line_discount_' + n + '" class="form-control form-control-sm text-end" step="0.01" placeholder="0" oninput="calcTotal()"></td>' +
+        '<td><select name="line_tax_' + n + '" class="form-select form-select-sm" onchange="calcTotal()">' + taxOptions + '</select></td>' +
+        '<td class="text-end line-subtotal fw-semibold align-middle">$0.00</td>' +
+        '<td><button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="this.closest(\'tr\').remove();calcTotal()"><i class="bi bi-x-lg"></i></button></td>';
     document.getElementById('linesBody').appendChild(tr);
 }
 
 function calcTotal() {
-    var total = 0;
+    var sub = 0, discountSum = 0, taxSum = 0;
     document.querySelectorAll('#linesBody tr').forEach(function(tr) {
-        var qty = parseFloat(tr.querySelector('[name*=qty]').value) || 0;
-        var price = parseFloat(tr.querySelector('[name*=price]').value) || 0;
-        var sub = qty * price;
-        tr.querySelector('.line-subtotal').textContent = '$' + sub.toFixed(2);
-        total += sub;
+        var qty      = parseFloat(tr.querySelector('[name*="line_qty_"]').value)      || 0;
+        var price    = parseFloat(tr.querySelector('[name*="line_price_"]').value)    || 0;
+        var disc     = parseFloat(tr.querySelector('[name*="line_discount_"]').value) || 0;
+        var taxSel   = tr.querySelector('[name*="line_tax_"]');
+        var taxRate  = 0;
+        if (taxSel && taxSel.selectedIndex > 0)
+            taxRate = parseFloat(taxSel.options[taxSel.selectedIndex].dataset.amount) || 0;
+        var gross = qty * price;
+        var discAmt = gross * (disc / 100);
+        var net   = gross - discAmt;
+        var tax   = net * (taxRate / 100);
+        tr.querySelector('.line-subtotal').textContent = fmt(net);
+        sub += gross; discountSum += discAmt; taxSum += tax;
     });
-    document.getElementById('grandTotal').textContent = '$' + total.toFixed(2);
+    var grand = sub - discountSum + taxSum;
+    document.getElementById('subTotal').textContent      = fmt(sub);
+    document.getElementById('discountTotal').textContent = '-' + fmt(discountSum);
+    document.getElementById('taxTotal').textContent      = fmt(taxSum);
+    document.getElementById('grandTotal').textContent    = fmt(grand);
+    document.getElementById('footerTotal').textContent   = fmt(grand);
 }
+
+function fmt(n) {
+    return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function recomputeDueDate() {
+    var dateEl = document.getElementById('invoiceDate');
+    var termEl = document.getElementById('termsSelect');
+    var dueEl  = document.getElementById('dueDate');
+    if (!dateEl || !termEl || !dueEl || !dateEl.value) return;
+    var opt = termEl.options[termEl.selectedIndex];
+    if (!opt || !opt.value) return;
+    var label = (opt.dataset.name || opt.textContent || '').toLowerCase();
+    var days = null;
+    if (label.indexOf('receipt') !== -1) days = 0;
+    else { var m = label.match(/\b(\d{1,3})\b/); if (m) days = parseInt(m[1], 10); }
+    if (days === null) return;
+    var d = new Date(dateEl.value + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    dueEl.value = d.toISOString().slice(0, 10);
+}
+
+document.addEventListener('DOMContentLoaded', calcTotal);
+
+/* ── Import-from-Sales-Order picker ──────────────────────────────────────
+ * When the user picks an SO, we AJAX its detail and assign the resulting
+ * customer, analytic, and reference onto the matching form selects. Works
+ * with both native <select>s and Tom Select widgets (we dispatch 'change'
+ * events + call refreshSearchableSelect where needed).
+ */
+(function() {
+    var picker = document.getElementById('soPicker');
+    if (!picker) return;
+    var clearBtn = document.getElementById('soClearBtn');
+    var helpEl = document.getElementById('soPickerHelp');
+
+    function setSelectValue(nameAttr, value) {
+        var sel = document.querySelector('[name="' + nameAttr + '"]');
+        if (!sel) return;
+        if (sel.tomselect) {
+            sel.tomselect.setValue(value || '', true);
+        } else {
+            sel.value = value || '';
+        }
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function setText(nameAttr, value) {
+        var inp = document.querySelector('[name="' + nameAttr + '"]');
+        if (inp) inp.value = value || '';
+    }
+
+    picker.addEventListener('change', function() {
+        var soId = picker.value;
+        if (!soId) return;
+        if (helpEl) helpEl.textContent = 'Loading sales order…';
+        fetch('/accounting/api/sale-order/' + encodeURIComponent(soId))
+            .then(function(r) {
+                if (!r.ok) throw new Error('Sales order not found');
+                return r.json();
+            })
+            .then(function(data) {
+                if (data.partner_id) setSelectValue('partner_id', String(data.partner_id));
+                if (data.analytic_id) setSelectValue('analytic_id', String(data.analytic_id));
+                if (data.name) setText('ref', data.name);
+                if (helpEl) {
+                    var jobLabel = '';
+                    if (data.analytic_name) {
+                        jobLabel = ' · <i class="bi bi-briefcase"></i> ' +
+                            (data.analytic_code ? '<span class="text-muted">' + data.analytic_code + '</span> ' : '') +
+                            data.analytic_name;
+                    }
+                    var amountStr = Number(data.amount_total || 0).toLocaleString(
+                        'en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+                    var msg =
+                        '<i class="bi bi-check-circle text-success"></i> Imported <strong>' +
+                        data.name + '</strong> · ' + (data.partner_name || '') +
+                        jobLabel + ' · $' + amountStr;
+                    if (!data.analytic_id) {
+                        msg += '<br><span class="text-warning">' +
+                            '<i class="bi bi-exclamation-triangle"></i> ' +
+                            'No analytic account is tagged on this SO — pick a Job manually below.' +
+                            '</span>';
+                    }
+                    helpEl.innerHTML = msg;
+                }
+            })
+            .catch(function(err) {
+                if (helpEl) helpEl.textContent = 'Error loading SO: ' + err.message;
+            });
+    });
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            if (picker.tomselect) picker.tomselect.clear(true); else picker.value = '';
+            if (helpEl) {
+                helpEl.textContent =
+                    'Selecting an SO fills Customer, Job (Analytic), and Order Number. ' +
+                    'Use this for progress billing against an existing contract.';
+            }
+        });
+    }
+})();
 </script>
+{% endif %}
 {% endblock %}

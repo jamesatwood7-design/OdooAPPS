@@ -118,31 +118,74 @@
                 <span class="badge bg-secondary">{{ attachments|length }}</span>
             </div>
             <div class="card-body">
+                {% set has_main = attachments|selectattr('is_main')|list|length > 0 %}
+                {% if has_main %}
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle"></i>
+                    The <strong>Main PDF</strong> below is what Odoo sends to the customer.
+                    Odoo caches it after the first send — if you've edited this {{ 'invoice' if move.move_type in ('out_invoice', 'out_refund') else 'bill' }},
+                    delete that PDF here so Odoo regenerates a fresh copy on the next send.
+                </div>
+                {% endif %}
                 {% if attachments %}
                 <div class="list-group list-group-flush mb-3">
                     {% for att in attachments %}
-                    <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
-                       target="_blank"
-                       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
-                        <div>
-                            {% if att.is_pdf %}
-                                <i class="bi bi-file-earmark-pdf text-danger"></i>
-                            {% elif att.is_image %}
-                                <i class="bi bi-file-earmark-image text-primary"></i>
-                            {% else %}
-                                <i class="bi bi-file-earmark text-secondary"></i>
-                            {% endif %}
-                            <span class="ms-1">{{ att.name }}</span>
-                            <br><small class="text-muted">{{ att.size_display }} &middot; {{ att.create_date[:10] if att.create_date else '' }}</small>
+                    <div class="list-group-item px-2">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="flex-grow-1 min-w-0">
+                                {% if att.is_pdf %}
+                                    <i class="bi bi-file-earmark-pdf text-danger"></i>
+                                {% elif att.is_image %}
+                                    <i class="bi bi-file-earmark-image text-primary"></i>
+                                {% else %}
+                                    <i class="bi bi-file-earmark text-secondary"></i>
+                                {% endif %}
+                                <span class="ms-1 fw-semibold">{{ att.name }}</span>
+                                {% if att.is_main %}
+                                    <span class="badge bg-primary ms-1" title="Odoo will send this file to the customer">Main PDF</span>
+                                {% endif %}
+                                <br><small class="text-muted">{{ att.size_display }} &middot; {{ att.create_date[:10] if att.create_date else '' }}</small>
+                            </div>
+                            <div class="btn-group btn-group-sm flex-shrink-0" role="group">
+                                {% if att.is_previewable %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id) }}"
+                                   target="_blank" rel="noopener"
+                                   class="btn btn-outline-secondary" title="Preview in new tab">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                {% endif %}
+                                <a href="{{ url_for('accounting.download_attachment', attachment_id=att.id, download=1) }}"
+                                   class="btn btn-outline-primary" title="Download">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                {% if can_write %}
+                                <form method="POST"
+                                      action="{{ url_for('accounting.delete_move_attachment', move_id=move.id, attachment_id=att.id) }}"
+                                      onsubmit="return confirm('{% if att.is_main %}Delete the Main PDF? Odoo will generate a fresh one the next time you send this {{ 'invoice' if move.move_type in ('out_invoice', 'out_refund') else 'bill' }}.{% else %}Delete this attachment?{% endif %}');"
+                                      class="d-inline">
+                                    <button type="submit" class="btn btn-outline-danger"
+                                            title="Delete attachment">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
                         </div>
-                        <i class="bi bi-download"></i>
-                    </a>
+                    </div>
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-muted text-center mb-3">No attachments yet.</p>
+                <p class="text-muted text-center mb-1">No attachments yet.</p>
+                {% if move.move_type in ('out_invoice', 'out_refund') and move.state == 'posted' %}
+                <p class="text-muted small text-center mb-3">
+                    Odoo creates the invoice PDF the first time you click <em>Send &amp; Print</em> in Odoo.
+                </p>
+                {% else %}
+                <p class="mb-3"></p>
+                {% endif %}
                 {% endif %}
 
+                {% if can_write %}
                 <!-- Upload -->
                 <form method="POST" action="{{ url_for('accounting.upload_attachment', move_id=move.id) }}"
                       enctype="multipart/form-data">
@@ -155,6 +198,7 @@
                     </div>
                     <small class="text-muted">PDF, images, or documents</small>
                 </form>
+                {% endif %}
             </div>
         </div>
     </div>

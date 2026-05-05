@@ -1,5 +1,8 @@
 from datetime import date, timedelta
-from flask import render_template, request, flash, redirect, url_for, current_app, jsonify
+from flask import (
+    render_template, request, flash, redirect, url_for, current_app,
+    jsonify, session, make_response,
+)
 from accounting import bp
 from accounting import services
 from accounting import transactions
@@ -127,136 +130,288 @@ def cash_flow():
 # Transaction List
 # ---------------------------------------------------------------------------
 
-@bp.route('/invoices')
-@permission_required('accounting', 'read')
-def invoice_list():
-    odoo = current_app.odoo
-    state = request.args.get('state', '')
-    payment_state = request.args.get('payment_state', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+from common.list_query import (
+    parse_list_query, search_facet, select_facet, date_range_facet,
+)
+from common.list_totals import compute_list_totals
 
+
+def _move_facets(partner_label):
+    return [
+        search_facet(
+            'q', ['name', 'partner_id.name', 'ref', 'invoice_origin'],
+            placeholder=f'Search number, {partner_label.lower()}, source…',
+        ),
+        select_facet('state', 'state', [
+            ('draft', 'Draft'),
+            ('posted', 'Posted'),
+            ('cancel', 'Cancelled'),
+        ], label='Status'),
+        select_facet('payment_state', 'payment_state', [
+            ('not_paid', 'Unpaid'),
+            ('partial', 'Partial'),
+            ('paid', 'Paid'),
+            ('in_payment', 'In Payment'),
+        ], label='Payment'),
+        date_range_facet('date_from', 'date_to', 'invoice_date'),
+    ]
+
+
+MOVE_SORT_MAP = {
+    'date': 'invoice_date',
+    'name': 'name',
+    'partner': 'partner_id',
+    'amount': 'amount_total',
+    'residual': 'amount_residual',
+    'state': 'state',
+    'payment': 'payment_state',
+}
+
+
+def _render_move_list(move_type, title, partner_label):
+    odoo = current_app.odoo
+    facets = _move_facets(partner_label)
+    query = parse_list_query(
+        request.args, facets, MOVE_SORT_MAP,
+        default_sort='date_desc',
+    )
     moves = []
+    totals = {'count': 0, 'sums': {'amount_total': 0.0, 'amount_residual': 0.0}}
     try:
-        moves = transactions.get_moves(
-            odoo, move_type='invoices',
-            state=state or None,
-            payment_state=payment_state or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
+        moves, full_domain = transactions.get_moves_list(
+            odoo, move_type,
+            domain=query['domain'],
+            order=query['order'],
+            offset=query['offset'],
+            limit=query['limit'],
+        )
+        totals = compute_list_totals(
+            odoo, 'account.move', full_domain,
+            sum_fields=['amount_total', 'amount_residual'],
         )
     except Exception as e:
         flash(f'Error: {e}', 'danger')
 
-    return render_template('accounting/move_list.html',
-                           moves=moves, title='Customer Invoices',
-                           list_type='invoices',
-                           state=state, payment_state=payment_state,
-                           date_from=date_from, date_to=date_to)
+    return render_template(
+        'accounting/move_list.html',
+        moves=moves,
+        title=title,
+        list_type=move_type,
+        partner_label=partner_label,
+        facets=facets,
+        query=query,
+        totals=totals,
+    )
+
+
+@bp.route('/invoices')
+@permission_required('accounting', 'read')
+def invoice_list():
+    return _render_move_list('invoices', 'Customer Invoices', 'Customer')
 
 
 @bp.route('/bills')
 @permission_required('accounting', 'read')
 def bill_list():
-    odoo = current_app.odoo
-    state = request.args.get('state', '')
-    payment_state = request.args.get('payment_state', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-
-    moves = []
-    try:
-        moves = transactions.get_moves(
-            odoo, move_type='bills',
-            state=state or None,
-            payment_state=payment_state or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
-        )
-    except Exception as e:
-        flash(f'Error: {e}', 'danger')
-
-    return render_template('accounting/move_list.html',
-                           moves=moves, title='Vendor Bills',
-                           list_type='bills',
-                           state=state, payment_state=payment_state,
-                           date_from=date_from, date_to=date_to)
+    return _render_move_list('bills', 'Vendor Bills', 'Vendor')
 
 
 # ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
 
-@bp.route('/invoice/create', methods=['GET', 'POST'])
-@permission_required('accounting', 'write')
-def create_invoice():
+def _pick_dominant_analytic(invoice_lines):
+    """Delegate to the shared tally helper so SO import and invoice view
+    agree on which job an invoice belongs to."""
+    return transactions._tally_analytic_distribution(invoice_lines)
+
+
+def _handle_move_create(kind, move=None):
+    """Shared POST/GET handler for create AND edit of invoices and bills.
+
+    When ``move`` is supplied, the page runs in edit mode: form submissions
+    update the existing record via Odoo write() rather than creating a new
+    one, and the template pre-fills every input with the current values.
+    Edit is only meaningful on draft moves (posted moves must be reset
+    first).
+    """
     odoo = current_app.odoo
+    is_invoice = (kind == 'invoice')
+    is_edit = move is not None
 
     if request.method == 'POST':
+        import base64
+
         try:
             partner_id = request.form.get('partner_id', type=int)
+            if not partner_id:
+                flash(f'Please select a {"customer" if is_invoice else "vendor"}.', 'warning')
+                return redirect(request.path)
+
             invoice_date = request.form.get('invoice_date', date.today().isoformat())
+            name = (request.form.get('name') or '').strip() or None
             ref = request.form.get('ref', '')
             analytic_id = request.form.get('analytic_id', type=int)
+            payment_term_id = request.form.get('payment_term_id', type=int)
+            date_due = request.form.get('date_due') or None
+            user_id = request.form.get('user_id', type=int)
+            subject = request.form.get('subject', '')
+            customer_notes = request.form.get('customer_notes', '')
+            terms = request.form.get('terms', '')
+            action = request.form.get('action', 'draft')
 
             lines = _parse_lines(request.form)
             if not lines:
                 flash('Please add at least one line.', 'warning')
-                return redirect(url_for('accounting.create_invoice'))
+                return redirect(request.path)
 
-            move_id = transactions.create_invoice(
-                odoo, partner_id, invoice_date, lines, ref=ref, analytic_id=analytic_id
+            kwargs = dict(
+                ref=ref, analytic_id=analytic_id,
+                name=name, payment_term_id=payment_term_id,
+                date_due=date_due, user_id=user_id,
+                subject=subject, customer_notes=customer_notes, terms=terms,
             )
-            flash(f'Invoice created successfully.', 'success')
+
+            if is_edit:
+                move_id = move['id']
+                transactions.update_move(
+                    odoo, move_id, partner_id, invoice_date, lines, **kwargs,
+                )
+            else:
+                creator = transactions.create_invoice if is_invoice else transactions.create_bill
+                move_id = creator(odoo, partner_id, invoice_date, lines, **kwargs)
+
+            files = request.files.getlist('attachments')
+            for f in files:
+                if not f or not f.filename:
+                    continue
+                try:
+                    data = base64.b64encode(f.read()).decode('utf-8')
+                    transactions.upload_attachment(
+                        odoo, move_id, f.filename, data,
+                        f.mimetype or 'application/octet-stream',
+                    )
+                except Exception as upload_err:
+                    current_app.logger.warning(
+                        'Attachment upload failed on move %s: %s',
+                        move_id, upload_err,
+                    )
+                    flash(f'"{f.filename}" could not be uploaded: {upload_err}', 'warning')
+
+            label = 'Invoice' if is_invoice else 'Bill'
+            if action == 'send':
+                try:
+                    transactions.post_move(odoo, move_id)
+                    flash(f'{label} {"updated" if is_edit else "created"} and posted.', 'success')
+                except Exception as post_err:
+                    flash(f'{label} {"updated" if is_edit else "created"} but could not be posted: {post_err}', 'warning')
+            else:
+                flash(
+                    f'{label} {"updated" if is_edit else "saved as draft"}.',
+                    'success',
+                )
+
             return redirect(url_for('accounting.view_move', move_id=move_id))
         except Exception as e:
             flash(f'Error: {e}', 'danger')
 
-    return render_template('accounting/create_move.html',
-                           move_type='invoice',
-                           title='Create Customer Invoice',
-                           partners=transactions.get_partners(odoo, 'customer'),
-                           products=transactions.get_products(odoo, sale=True),
-                           accounts=transactions.get_accounts(odoo),
-                           analytics=transactions.get_analytic_accounts(odoo),
-                           taxes=transactions.get_taxes(odoo, 'sale'),
-                           today=date.today().isoformat())
+    subject, customer_notes, terms = ('', '', '')
+    if is_edit:
+        subject, customer_notes, terms = transactions.parse_narration(
+            move.get('narration') or '',
+        )
+
+    if is_edit:
+        title = f'Edit {"Invoice" if is_invoice else "Bill"} {move.get("name") or ""}'.strip()
+    else:
+        title = 'Create Customer Invoice' if is_invoice else 'Create Vendor Bill'
+
+    # Only sales orders are relevant on customer invoices — bills pull from
+    # purchase orders (not implemented here yet).
+    sales_orders = transactions.get_open_sales_orders(odoo) if is_invoice else []
+
+    return render_template(
+        'accounting/create_move.html',
+        move_type=kind,
+        title=title,
+        is_edit=is_edit,
+        move=move,
+        prefill_subject=subject,
+        prefill_customer_notes=customer_notes,
+        prefill_terms=terms,
+        partners=transactions.get_partners(odoo, 'customer' if is_invoice else 'supplier'),
+        products=transactions.get_products(odoo, sale=is_invoice),
+        accounts=transactions.get_accounts(odoo),
+        analytics=transactions.get_analytic_accounts(odoo),
+        taxes=transactions.get_taxes(odoo, 'sale' if is_invoice else 'purchase'),
+        payment_terms=transactions.get_payment_terms(odoo),
+        salespersons=transactions.get_salespersons(odoo),
+        sales_orders=sales_orders,
+        today=date.today().isoformat(),
+    )
+
+
+@bp.route('/api/sale-order/<int:so_id>')
+@permission_required('accounting', 'read')
+def api_sale_order(so_id):
+    """JSON detail for a single SO — used by the Create Invoice form's
+    "From Sales Order" picker to pre-fill customer and job."""
+    odoo = current_app.odoo
+    try:
+        data = transactions.get_sale_order_detail(odoo, so_id)
+        if not data:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(data)
+    except Exception as e:
+        current_app.logger.warning('SO fetch failed: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/move/<int:move_id>/edit', methods=['GET', 'POST'])
+@permission_required('accounting', 'write')
+def edit_move(move_id):
+    odoo = current_app.odoo
+    try:
+        move = transactions.get_move(odoo, move_id)
+    except Exception as e:
+        flash(f'Error loading transaction: {e}', 'danger')
+        return redirect(url_for('accounting.invoice_list'))
+
+    if not move:
+        flash('Transaction not found.', 'warning')
+        return redirect(url_for('accounting.invoice_list'))
+
+    if move.get('state') != 'draft':
+        flash('Only draft transactions can be edited. Use "Reset to Draft" first.',
+              'warning')
+        return redirect(url_for('accounting.view_move', move_id=move_id))
+
+    kind = 'invoice' if move.get('move_type') in ('out_invoice', 'out_refund') else 'bill'
+    return _handle_move_create(kind, move=move)
+
+
+@bp.route('/move/<int:move_id>/reset-draft', methods=['POST'])
+@permission_required('accounting', 'write')
+def reset_move_to_draft(move_id):
+    odoo = current_app.odoo
+    try:
+        transactions.reset_move_to_draft(odoo, move_id)
+        flash('Transaction reset to draft — you can now edit it.', 'success')
+    except Exception as e:
+        flash(f'Could not reset to draft: {e}', 'danger')
+    return redirect(url_for('accounting.view_move', move_id=move_id))
+
+
+@bp.route('/invoice/create', methods=['GET', 'POST'])
+@permission_required('accounting', 'write')
+def create_invoice():
+    return _handle_move_create('invoice')
 
 
 @bp.route('/bill/create', methods=['GET', 'POST'])
 @permission_required('accounting', 'write')
 def create_bill():
-    odoo = current_app.odoo
-
-    if request.method == 'POST':
-        try:
-            partner_id = request.form.get('partner_id', type=int)
-            invoice_date = request.form.get('invoice_date', date.today().isoformat())
-            ref = request.form.get('ref', '')
-            analytic_id = request.form.get('analytic_id', type=int)
-
-            lines = _parse_lines(request.form)
-            if not lines:
-                flash('Please add at least one line.', 'warning')
-                return redirect(url_for('accounting.create_bill'))
-
-            move_id = transactions.create_bill(
-                odoo, partner_id, invoice_date, lines, ref=ref, analytic_id=analytic_id
-            )
-            flash(f'Bill created successfully.', 'success')
-            return redirect(url_for('accounting.view_move', move_id=move_id))
-        except Exception as e:
-            flash(f'Error: {e}', 'danger')
-
-    return render_template('accounting/create_move.html',
-                           move_type='bill',
-                           title='Create Vendor Bill',
-                           partners=transactions.get_partners(odoo, 'supplier'),
-                           products=transactions.get_products(odoo, sale=False),
-                           accounts=transactions.get_accounts(odoo),
-                           analytics=transactions.get_analytic_accounts(odoo),
-                           taxes=transactions.get_taxes(odoo, 'purchase'),
-                           today=date.today().isoformat())
+    return _handle_move_create('bill')
 
 
 @bp.route('/payment/create', methods=['GET', 'POST'])
@@ -375,8 +530,56 @@ def view_move(move_id):
         flash(f'Error: {e}', 'danger')
         return redirect(url_for('accounting.trial_balance'))
 
-    return render_template('accounting/view_move.html', move=move,
-                           attachments=attachments)
+    from auth.db import has_permission
+    can_write = has_permission(session.get('permissions', {}),
+                               'accounting', 'write')
+
+    subject, customer_notes, terms = transactions.parse_narration(
+        move.get('narration') or '',
+    )
+    is_invoice = move.get('move_type') in ('out_invoice', 'out_refund')
+    kind = 'invoice' if is_invoice else 'bill'
+
+    # If this invoice is tied to a job, compute the progress-billing context
+    # so the same Contract/Billed/Paid/Outstanding/Remaining card appears here.
+    billing_summary = None
+    if is_invoice:
+        analytic_id = _pick_dominant_analytic(move.get('invoice_lines') or [])
+        if analytic_id:
+            try:
+                from jobcosting import services as jc_services
+                billing_summary = jc_services.get_billing_summary(
+                    odoo, analytic_id,
+                )
+                billing_summary['analytic_id'] = analytic_id
+            except Exception as bs_err:
+                current_app.logger.warning(
+                    'Billing summary failed for move %s: %s',
+                    move_id, bs_err,
+                )
+
+    return render_template(
+        'accounting/create_move.html',
+        mode='view',
+        move_type=kind,
+        title=move.get('name') or 'Transaction',
+        move=move,
+        attachments=attachments,
+        can_write=can_write,
+        prefill_subject=subject,
+        prefill_customer_notes=customer_notes,
+        prefill_terms=terms,
+        analytics=transactions.get_analytic_accounts(odoo),
+        partners=[],
+        products=[],
+        accounts=[],
+        taxes=[],
+        payment_terms=[],
+        salespersons=[],
+        sales_orders=[],
+        billing_summary=billing_summary,
+        today=date.today().isoformat(),
+    )
 
 
 @bp.route('/move/<int:move_id>/upload', methods=['POST'])
@@ -402,12 +605,43 @@ def upload_attachment(move_id):
     return redirect(url_for('accounting.view_move', move_id=move_id))
 
 
+@bp.route('/move/<int:move_id>/attachment/<int:attachment_id>/delete',
+          methods=['POST'])
+@permission_required('accounting', 'write')
+def delete_move_attachment(move_id, attachment_id):
+    """Delete an attachment on a specific move.
+
+    Deleting the "main" (cached) PDF here is the documented workaround
+    for Odoo caching the rendered invoice: the next Send & Print triggers
+    a fresh render from the current invoice data.
+    """
+    odoo = current_app.odoo
+    try:
+        ok = transactions.delete_attachment(odoo, attachment_id, move_id)
+        if ok:
+            flash('Attachment deleted. Odoo will regenerate the PDF the '
+                  'next time you send the invoice.', 'success')
+        else:
+            flash('Attachment not found for this document.', 'warning')
+    except Exception as e:
+        flash(f'Delete failed: {e}', 'danger')
+    return redirect(url_for('accounting.view_move', move_id=move_id))
+
+
 @bp.route('/attachment/<int:attachment_id>')
 @permission_required('accounting', 'read')
 def download_attachment(attachment_id):
-    """Download/view an attachment."""
+    """Serve an ir.attachment inline (preview) or as a forced download.
+
+    ``?download=1`` switches to ``Content-Disposition: attachment`` so the
+    browser saves the file instead of rendering it. Default is inline so
+    PDFs/images open in the browser tab.
+    """
     odoo = current_app.odoo
     import base64
+    from urllib.parse import quote
+
+    force_download = request.args.get('download') in ('1', 'true', 'yes')
 
     try:
         atts = odoo.search_read(
@@ -415,16 +649,24 @@ def download_attachment(attachment_id):
             [('id', '=', attachment_id)],
             fields=['name', 'datas', 'mimetype'],
         )
-        if not atts:
-            flash('Attachment not found.', 'warning')
+        if not atts or not atts[0].get('datas'):
+            flash('Attachment not found or empty.', 'warning')
             return redirect(url_for('accounting.trial_balance'))
 
         att = atts[0]
         data = base64.b64decode(att['datas'])
 
+        disposition = 'attachment' if force_download else 'inline'
+        filename = att['name'] or f'attachment-{attachment_id}'
+        # RFC 5987: quote non-ASCII filenames for broad browser support.
+        quoted = quote(filename)
+
         response = make_response(data)
-        response.headers['Content-Type'] = att.get('mimetype', 'application/octet-stream')
-        response.headers['Content-Disposition'] = f'inline; filename="{att["name"]}"'
+        response.headers['Content-Type'] = att.get('mimetype') or 'application/octet-stream'
+        response.headers['Content-Disposition'] = (
+            f"{disposition}; filename=\"{filename}\"; filename*=UTF-8''{quoted}"
+        )
+        response.headers['Content-Length'] = str(len(data))
         return response
     except Exception as e:
         flash(f'Error: {e}', 'danger')
@@ -514,11 +756,10 @@ def reconcile_match():
 # ---------------------------------------------------------------------------
 
 def _parse_lines(form):
-    """Parse invoice/bill lines from form data."""
+    """Parse invoice/bill lines from form data. Includes per-line discount."""
     lines = []
     i = 0
     while True:
-        # Check for either product or name based line
         if f'line_name_{i}' not in form and f'line_product_{i}' not in form:
             break
 
@@ -526,10 +767,13 @@ def _parse_lines(form):
         name = form.get(f'line_name_{i}', '')
         qty = float(form.get(f'line_qty_{i}', 1) or 1)
         price = float(form.get(f'line_price_{i}', 0) or 0)
+        discount = float(form.get(f'line_discount_{i}', 0) or 0)
         tax_id = form.get(f'line_tax_{i}', type=int)
 
         if name or product_id:
             line = {'name': name, 'quantity': qty, 'price_unit': price}
+            if discount:
+                line['discount'] = discount
             if product_id:
                 line['product_id'] = product_id
             if tax_id:

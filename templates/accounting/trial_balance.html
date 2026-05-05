@@ -1,34 +1,36 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 {% block title %}Trial Balance{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-journal-bookmark"></i> Trial Balance</h2>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md-3">
-                <label class="form-label">From</label>
-                <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">To</label>
-                <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
-            </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Apply</button>
-            </div>
-        </form>
+<form method="GET" class="list-filters">
+    <div class="filter-item">
+        <span class="filter-label">From</span>
+        <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
     </div>
-</div>
+    <div class="filter-item">
+        <span class="filter-label">To</span>
+        <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
+    </div>
+    <div class="filter-actions">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
+    </div>
+</form>
 
 {% if data.rows %}
-<div class="card">
-    <div class="card-body p-0">
-        <table class="table table-sm table-hover mb-0" style="font-size: 0.9rem;">
-            <thead class="table-dark">
+<div class="list-toolbar">
+    <label class="list-search">
+        <i class="bi bi-search"></i>
+        <input type="text" placeholder="Search by code or account name…"
+               data-list-filter="#tbTable" data-list-counter="#tbCount">
+    </label>
+    <span class="list-meta"><strong id="tbCount">{{ data.rows|length }}</strong> of {{ data.rows|length }}</span>
+</div>
+
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0" id="tbTable">
+            <thead>
                 <tr>
                     <th>Code</th>
                     <th>Account</th>
@@ -50,8 +52,8 @@
                 </tr>
                 {% endfor %}
             </tbody>
-            <tfoot style="border-top: 3px double #000;">
-                <tr class="fw-bold fs-6">
+            <tfoot>
+                <tr>
                     <td colspan="2">TOTALS</td>
                     <td class="text-end">${{ '{:,.2f}'.format(data.total_debit) }}</td>
                     <td class="text-end">${{ '{:,.2f}'.format(data.total_credit) }}</td>
@@ -62,6 +64,7 @@
     </div>
 </div>
 {% else %}
-<div class="alert alert-info">No data for the selected period.</div>
+{{ empty_state('inbox', 'No data for the selected period',
+    'Try widening the date range or check if journal entries exist.') }}
 {% endif %}
 {% endblock %}

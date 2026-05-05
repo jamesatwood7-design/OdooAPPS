@@ -6,142 +6,181 @@
     <title>{% block title %}DA Steel Buildings{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     {% block extra_head %}{% endblock %}
 </head>
+{% set path = request.path %}
+{% set perms = session.get('permissions', {}) %}
 <body>
     <div class="d-flex">
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <!-- Logo -->
             <div class="sidebar-header">
-                <a href="/" class="sidebar-brand">
+                <a href="/" class="sidebar-brand" title="DA Steel Buildings">
                     <i class="bi bi-buildings"></i>
                     <span class="sidebar-text">DA Steel Buildings</span>
                 </a>
-                <button class="sidebar-toggle btn btn-link text-white p-0" onclick="toggleSidebar()">
-                    <i class="bi bi-list"></i>
+                <button class="sidebar-toggle btn btn-link p-0 d-none d-lg-inline-flex"
+                        onclick="toggleSidebar()" aria-label="Collapse sidebar">
+                    <i class="bi bi-layout-sidebar"></i>
                 </button>
             </div>
 
             <!-- Navigation -->
             <nav class="sidebar-nav">
-                {% if session.get('permissions', {}).get('timeclock', {}).get('read') %}
+                {% if perms.get('timeclock', {}).get('read') %}
                 <a href="{{ url_for('timeclock.dashboard') }}"
-                   class="sidebar-link {% if request.path.startswith('/timeclock') %}active{% endif %}">
+                   class="sidebar-link {% if path.startswith('/timeclock') %}active{% endif %}"
+                   title="Time Clock">
                     <i class="bi bi-clock"></i>
                     <span class="sidebar-text">Time Clock</span>
                 </a>
                 {% endif %}
 
-                {% if session.get('permissions', {}).get('jobs', {}).get('read') %}
+                {% if perms.get('jobs', {}).get('read') %}
                 <a href="{{ url_for('jobcosting.jobs_dashboard') }}"
-                   class="sidebar-link {% if request.path.startswith('/jobcosting') %}active{% endif %}">
+                   class="sidebar-link {% if path.startswith('/jobcosting') and not path.startswith('/jobcosting/profitability') and not path.startswith('/jobcosting/employee-costs') and not path.startswith('/jobcosting/wip') %}active{% endif %}"
+                   title="Jobs">
                     <i class="bi bi-briefcase"></i>
                     <span class="sidebar-text">Jobs</span>
                 </a>
                 {% endif %}
 
-                {% if session.get('permissions', {}).get('accounting', {}).get('read') %}
+                {% if perms.get('accounting', {}).get('read') %}
                 <div class="sidebar-section">
-                    <span class="sidebar-section-label sidebar-text">CUSTOMERS</span>
+                    <span class="sidebar-section-label sidebar-text">Customers</span>
                 </div>
-                <a href="{{ url_for('accounting.invoice_list') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.invoice_list') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/invoices') %}active{% endif %}"
+                   title="Invoices">
                     <i class="bi bi-receipt"></i>
                     <span class="sidebar-text">Invoices</span>
                 </a>
-                <a href="{{ url_for('accounting.aged_receivable') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.aged_receivable') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/aged-receivable') %}active{% endif %}"
+                   title="Aged Receivables">
                     <i class="bi bi-calendar3-range"></i>
                     <span class="sidebar-text">Aged Receivables</span>
                 </a>
-                {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
-                <a href="{{ url_for('accounting.create_invoice') }}" class="sidebar-link">
+                {% if perms.get('accounting', {}).get('write') %}
+                <a href="{{ url_for('accounting.create_invoice') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/invoice/create') %}active{% endif %}"
+                   title="Create Invoice">
                     <i class="bi bi-plus-circle"></i>
                     <span class="sidebar-text">Create Invoice</span>
                 </a>
                 {% endif %}
 
                 <div class="sidebar-section">
-                    <span class="sidebar-section-label sidebar-text">VENDORS</span>
+                    <span class="sidebar-section-label sidebar-text">Vendors</span>
                 </div>
-                <a href="{{ url_for('accounting.bill_list') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.bill_list') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/bills') %}active{% endif %}"
+                   title="Bills">
                     <i class="bi bi-file-earmark-text"></i>
                     <span class="sidebar-text">Bills</span>
                 </a>
-                <a href="{{ url_for('accounting.aged_payable') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.aged_payable') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/aged-payable') %}active{% endif %}"
+                   title="Aged Payables">
                     <i class="bi bi-calendar3-range"></i>
                     <span class="sidebar-text">Aged Payables</span>
                 </a>
-                {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
-                <a href="{{ url_for('accounting.create_bill') }}" class="sidebar-link">
+                {% if perms.get('accounting', {}).get('write') %}
+                <a href="{{ url_for('accounting.create_bill') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/bill/create') %}active{% endif %}"
+                   title="Create Bill">
                     <i class="bi bi-plus-circle"></i>
                     <span class="sidebar-text">Create Bill</span>
                 </a>
                 {% endif %}
 
                 <div class="sidebar-section">
-                    <span class="sidebar-section-label sidebar-text">ACCOUNTING</span>
+                    <span class="sidebar-section-label sidebar-text">Accounting</span>
                 </div>
-                <a href="{{ url_for('accounting.trial_balance') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.trial_balance') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/trial-balance') %}active{% endif %}"
+                   title="Trial Balance">
                     <i class="bi bi-journal-bookmark"></i>
                     <span class="sidebar-text">Trial Balance</span>
                 </a>
-                <a href="{{ url_for('accounting.cash_flow') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.cash_flow') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/cash-flow') %}active{% endif %}"
+                   title="Cash Flow">
                     <i class="bi bi-water"></i>
                     <span class="sidebar-text">Cash Flow</span>
                 </a>
-                {% if session.get('permissions', {}).get('accounting', {}).get('write') %}
-                <a href="{{ url_for('accounting.create_payment') }}" class="sidebar-link">
+                {% if perms.get('accounting', {}).get('write') %}
+                <a href="{{ url_for('accounting.create_payment') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/payment') %}active{% endif %}"
+                   title="Payments">
                     <i class="bi bi-cash-stack"></i>
                     <span class="sidebar-text">Payments</span>
                 </a>
-                <a href="{{ url_for('accounting.create_journal_entry') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.create_journal_entry') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/journal-entry') %}active{% endif %}"
+                   title="Journal Entry">
                     <i class="bi bi-journal-plus"></i>
                     <span class="sidebar-text">Journal Entry</span>
                 </a>
-                <a href="{{ url_for('accounting.reconcile') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.reconcile') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/reconcile') %}active{% endif %}"
+                   title="Reconciliation">
                     <i class="bi bi-check2-all"></i>
                     <span class="sidebar-text">Reconciliation</span>
                 </a>
                 {% endif %}
                 {% endif %}
 
-                {% if session.get('permissions', {}).get('reports', {}).get('read') or session.get('permissions', {}).get('accounting', {}).get('read') %}
+                {% if perms.get('reports', {}).get('read') or perms.get('accounting', {}).get('read') %}
                 <div class="sidebar-section">
-                    <span class="sidebar-section-label sidebar-text">REPORTING</span>
+                    <span class="sidebar-section-label sidebar-text">Reporting</span>
                 </div>
-                {% if session.get('permissions', {}).get('accounting', {}).get('read') %}
-                <a href="{{ url_for('accounting.pnl') }}" class="sidebar-link">
+                {% if perms.get('accounting', {}).get('read') %}
+                <a href="{{ url_for('accounting.pnl') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/pnl') %}active{% endif %}"
+                   title="Profit & Loss">
                     <i class="bi bi-graph-up-arrow"></i>
-                    <span class="sidebar-text">Profit & Loss</span>
+                    <span class="sidebar-text">Profit &amp; Loss</span>
                 </a>
-                <a href="{{ url_for('accounting.balance_sheet') }}" class="sidebar-link">
+                <a href="{{ url_for('accounting.balance_sheet') }}"
+                   class="sidebar-link {% if path.startswith('/accounting/balance-sheet') %}active{% endif %}"
+                   title="Balance Sheet">
                     <i class="bi bi-bank"></i>
                     <span class="sidebar-text">Balance Sheet</span>
                 </a>
                 {% endif %}
-                {% if session.get('permissions', {}).get('reports', {}).get('read') %}
-                <a href="{{ url_for('jobcosting.profitability') }}" class="sidebar-link">
+                {% if perms.get('reports', {}).get('read') %}
+                <a href="{{ url_for('jobcosting.profitability') }}"
+                   class="sidebar-link {% if path.startswith('/jobcosting/profitability') %}active{% endif %}"
+                   title="Profitability">
                     <i class="bi bi-pie-chart"></i>
                     <span class="sidebar-text">Profitability</span>
                 </a>
-                <a href="{{ url_for('jobcosting.employee_costs') }}" class="sidebar-link">
+                <a href="{{ url_for('jobcosting.employee_costs') }}"
+                   class="sidebar-link {% if path.startswith('/jobcosting/employee-costs') %}active{% endif %}"
+                   title="Employee Costs">
                     <i class="bi bi-people"></i>
                     <span class="sidebar-text">Employee Costs</span>
                 </a>
-                <a href="{{ url_for('jobcosting.wip_report') }}" class="sidebar-link">
+                <a href="{{ url_for('jobcosting.wip_report') }}"
+                   class="sidebar-link {% if path.startswith('/jobcosting/wip') %}active{% endif %}"
+                   title="WIP Report">
                     <i class="bi bi-clipboard-data"></i>
                     <span class="sidebar-text">WIP Report</span>
                 </a>
                 {% endif %}
                 {% endif %}
 
-                {% if session.get('permissions', {}).get('admin', {}).get('read') %}
+                {% if perms.get('admin', {}).get('read') %}
                 <div class="sidebar-section">
-                    <span class="sidebar-section-label sidebar-text">ADMIN</span>
+                    <span class="sidebar-section-label sidebar-text">Admin</span>
                 </div>
                 <a href="{{ url_for('auth.admin_users') }}"
-                   class="sidebar-link {% if request.path.startswith('/admin') %}active{% endif %}">
+                   class="sidebar-link {% if path.startswith('/admin') %}active{% endif %}"
+                   title="Users">
                     <i class="bi bi-people-gear"></i>
                     <span class="sidebar-text">Users</span>
                 </a>
@@ -151,15 +190,15 @@
             <!-- User footer -->
             {% if session.get('user_id') %}
             <div class="sidebar-footer">
-                <div class="sidebar-user">
+                <div class="sidebar-user" title="{{ session.get('user_name', '') }}">
                     <div class="sidebar-avatar">
                         {{ session.get('user_name', '?')[0] | upper }}
                     </div>
-                    <div class="sidebar-text">
+                    <div class="sidebar-text sidebar-user-info">
                         <div class="sidebar-user-name">{{ session.get('user_name', '') }}</div>
                     </div>
                 </div>
-                <a href="{{ url_for('auth.logout') }}" class="sidebar-link sidebar-logout">
+                <a href="{{ url_for('auth.logout') }}" class="sidebar-link sidebar-logout" title="Logout">
                     <i class="bi bi-box-arrow-left"></i>
                     <span class="sidebar-text">Logout</span>
                 </a>
@@ -170,13 +209,52 @@
         <!-- Main Content -->
         <div class="main-content" id="mainContent">
             <!-- Top bar (mobile toggle + breadcrumb area) -->
+            {% set topbar_map = [
+                ('/timeclock/kiosk', 'Time Clock', 'Kiosk', 'bi-clock'),
+                ('/timeclock', 'Time Clock', '', 'bi-clock'),
+                ('/jobcosting/profitability', 'Reporting', 'Profitability', 'bi-pie-chart'),
+                ('/jobcosting/employee-costs', 'Reporting', 'Employee Costs', 'bi-people'),
+                ('/jobcosting/wip', 'Reporting', 'WIP Report', 'bi-clipboard-data'),
+                ('/jobcosting', 'Jobs', '', 'bi-briefcase'),
+                ('/accounting/invoice/create', 'Customers', 'Create Invoice', 'bi-plus-circle'),
+                ('/accounting/invoices', 'Customers', 'Invoices', 'bi-receipt'),
+                ('/accounting/aged-receivable', 'Customers', 'Aged Receivables', 'bi-calendar3-range'),
+                ('/accounting/bill/create', 'Vendors', 'Create Bill', 'bi-plus-circle'),
+                ('/accounting/bills', 'Vendors', 'Bills', 'bi-file-earmark-text'),
+                ('/accounting/aged-payable', 'Vendors', 'Aged Payables', 'bi-calendar3-range'),
+                ('/accounting/trial-balance', 'Accounting', 'Trial Balance', 'bi-journal-bookmark'),
+                ('/accounting/cash-flow', 'Accounting', 'Cash Flow', 'bi-water'),
+                ('/accounting/payment', 'Accounting', 'Payments', 'bi-cash-stack'),
+                ('/accounting/journal-entry', 'Accounting', 'Journal Entry', 'bi-journal-plus'),
+                ('/accounting/reconcile', 'Accounting', 'Reconciliation', 'bi-check2-all'),
+                ('/accounting/move', 'Accounting', 'Journal Entry', 'bi-journal-text'),
+                ('/accounting/pnl', 'Reporting', 'Profit & Loss', 'bi-graph-up-arrow'),
+                ('/accounting/balance-sheet', 'Reporting', 'Balance Sheet', 'bi-bank'),
+                ('/admin', 'Admin', 'Users', 'bi-people-gear'),
+            ] %}
+            {% set tb = namespace(section='', page='', icon='') %}
+            {% for prefix, section, page, icon in topbar_map %}
+                {% if not tb.section and path.startswith(prefix) %}
+                    {% set tb.section = section %}{% set tb.page = page %}{% set tb.icon = icon %}
+                {% endif %}
+            {% endfor %}
             <header class="topbar">
-                <button class="btn btn-link text-dark d-lg-none p-0 me-3" onclick="toggleSidebar()">
+                <button class="btn btn-link topbar-menu p-0 me-3 d-lg-none"
+                        onclick="toggleSidebar()" aria-label="Open menu">
                     <i class="bi bi-list fs-4"></i>
                 </button>
-                <nav aria-label="breadcrumb" class="flex-grow-1">
-                    <h6 class="mb-0 text-muted">{% block page_title %}{% endblock %}</h6>
-                </nav>
+                <div class="flex-grow-1 d-flex align-items-center">
+                    {% block page_title %}
+                        {% if tb.icon %}<i class="bi {{ tb.icon }} topbar-icon me-2"></i>{% endif %}
+                        {% if tb.section %}
+                            <span class="topbar-section">{{ tb.section }}</span>
+                            {% if tb.page %}
+                                <i class="bi bi-chevron-right topbar-sep"></i>
+                                <span class="topbar-title">{{ tb.page }}</span>
+                            {% endif %}
+                        {% endif %}
+                    {% endblock %}
+                </div>
             </header>
 
             <!-- Flash Messages -->
@@ -201,19 +279,52 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+    <script src="{{ url_for('static', filename='js/searchable_select.js') }}"></script>
     <script>
-    function toggleSidebar() {
-        document.getElementById('sidebar').classList.toggle('collapsed');
-        document.getElementById('sidebar').classList.toggle('mobile-open');
-        document.getElementById('sidebarOverlay').classList.toggle('show');
-        localStorage.setItem('sidebarCollapsed',
-            document.getElementById('sidebar').classList.contains('collapsed'));
-    }
-    // Restore sidebar state
-    if (localStorage.getItem('sidebarCollapsed') === 'true') {
-        document.getElementById('sidebar').classList.add('collapsed');
-    }
+    (function() {
+        var sidebar = document.getElementById('sidebar');
+        var overlay = document.getElementById('sidebarOverlay');
+        var MOBILE_BP = 992;
+
+        // Restore persisted collapse state before first paint (desktop only).
+        if (window.innerWidth >= MOBILE_BP &&
+            localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+        }
+
+        window.toggleSidebar = function() {
+            if (window.innerWidth >= MOBILE_BP) {
+                sidebar.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed',
+                    sidebar.classList.contains('collapsed'));
+            } else {
+                var opening = !sidebar.classList.contains('mobile-open');
+                sidebar.classList.toggle('mobile-open', opening);
+                overlay.classList.toggle('show', opening);
+            }
+        };
+
+        // Close mobile drawer on resize back to desktop.
+        var lastW = window.innerWidth;
+        window.addEventListener('resize', function() {
+            var w = window.innerWidth;
+            if (lastW < MOBILE_BP && w >= MOBILE_BP) {
+                sidebar.classList.remove('mobile-open');
+                overlay.classList.remove('show');
+            }
+            lastW = w;
+        });
+
+        // Auto-scroll active link into view inside the sidebar.
+        var active = sidebar.querySelector('.sidebar-link.active');
+        if (active && active.scrollIntoView) {
+            active.scrollIntoView({ block: 'nearest' });
+        }
+    })();
     </script>
+    <script src="{{ url_for('static', filename='js/list_filter.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/in_page_filter.js') }}" defer></script>
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>

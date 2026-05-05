@@ -34,6 +34,11 @@
                 <button type="button" class="btn btn-outline-light btn-sm d-none" id="cancelBtn" onclick="cancelEdit()">
                     Cancel
                 </button>
+                <a href="{{ url_for('jobcosting.progress_bill', account_id=detail.account.id) }}"
+                   class="btn btn-info btn-sm text-white"
+                   title="Invoice the customer for a portion of this contract">
+                    <i class="bi bi-receipt"></i> Progress Bill
+                </a>
                 <a href="{{ url_for('jobcosting.create_entry') }}?account_id={{ detail.account.id }}"
                    class="btn btn-primary btn-sm">
                     <i class="bi bi-plus-circle"></i> Add Entry
@@ -60,8 +65,17 @@
     <div class="col">
         <div class="card text-center h-100 border-0 shadow-sm">
             <div class="card-body py-2 px-2">
-                <small class="text-muted d-block" style="font-size: 0.7rem;">Total Costs</small>
+                <small class="text-muted d-block" style="font-size: 0.7rem;">Billed Costs</small>
                 <strong class="fs-6 text-danger">${{ '{:,.0f}'.format(f.total_costs) }}</strong>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card text-center h-100 border-0 shadow-sm"
+             title="Open PO commitments not yet billed. Does not flow into Gross Profit or Margin.">
+            <div class="card-body py-2 px-2">
+                <small class="text-muted d-block" style="font-size: 0.7rem;">Purchase Orders</small>
+                <strong class="fs-6 text-warning">${{ '{:,.0f}'.format(f.committed_cost or 0) }}</strong>
             </div>
         </div>
     </div>
@@ -212,10 +226,60 @@
                     </div>
                     {% set billed_pct = (f.net_invoiced / f.total_contract * 100) if f.total_contract > 0 else 0 %}
                     {% if billed_pct > 100 %}{% set billed_pct = 100 %}{% endif %}
-                    <div class="progress" style="height: 24px;">
-                        <div class="progress-bar bg-success" style="width: {{ billed_pct }}%">
-                            {{ '{:.0f}'.format(billed_pct) }}% Billed
+                    {% set paid_pct = (detail.billing.paid / f.total_contract * 100) if f.total_contract > 0 else 0 %}
+                    {% if paid_pct > 100 %}{% set paid_pct = 100 %}{% endif %}
+                    <div class="progress" style="height: 24px; position: relative;">
+                        <div class="progress-bar bg-success" style="width: {{ paid_pct }}%"
+                             title="Paid by customer">
+                            {% if paid_pct > 8 %}{{ '{:.0f}'.format(paid_pct) }}% Paid{% endif %}
                         </div>
+                        {% set unpaid_width = billed_pct - paid_pct %}
+                        {% if unpaid_width > 0 %}
+                        <div class="progress-bar bg-warning" style="width: {{ unpaid_width }}%"
+                             title="Billed but not yet paid">
+                            {% if unpaid_width > 8 %}{{ '{:.0f}'.format(unpaid_width) }}% Unpaid{% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="row row-cols-2 row-cols-md-4 g-2 mt-2">
+                        <div class="col">
+                            <div class="border rounded p-2 bg-light">
+                                <small class="text-muted d-block" style="font-size:0.7rem;">Billed</small>
+                                <strong>${{ '{:,.0f}'.format(f.net_invoiced) }}</strong>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="border rounded p-2 bg-light">
+                                <small class="text-muted d-block" style="font-size:0.7rem;">Paid</small>
+                                <strong class="text-success">${{ '{:,.0f}'.format(detail.billing.paid) }}</strong>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="border rounded p-2 bg-light">
+                                <small class="text-muted d-block" style="font-size:0.7rem;">Outstanding</small>
+                                <strong class="{% if detail.billing.outstanding > 0 %}text-danger{% endif %}">
+                                    ${{ '{:,.0f}'.format(detail.billing.outstanding) }}
+                                </strong>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="border rounded p-2 bg-light">
+                                <small class="text-muted d-block" style="font-size:0.7rem;">Remaining to Bill</small>
+                                <strong class="{% if detail.billing.remaining < 0 %}text-danger{% else %}text-primary{% endif %}">
+                                    ${{ '{:,.0f}'.format(detail.billing.remaining) }}
+                                </strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <a href="{{ url_for('jobcosting.progress_bill', account_id=detail.account.id) }}"
+                           class="btn btn-sm btn-outline-info">
+                            <i class="bi bi-receipt"></i> Create Progress Bill
+                        </a>
+                        <small class="text-muted ms-2">
+                            {{ detail.billing.progress_bill_count }} prior posted
+                            invoice{{ 's' if detail.billing.progress_bill_count != 1 else '' }}.
+                        </small>
                     </div>
                 </div>
 
@@ -224,16 +288,30 @@
                     <div class="d-flex justify-content-between mb-1">
                         <small class="text-muted">Costs vs Contract Value</small>
                         <small class="fw-bold">
-                            ${{ '{:,.0f}'.format(f.total_costs) }} / ${{ '{:,.0f}'.format(f.total_contract) }}
+                            ${{ '{:,.0f}'.format(f.total_costs) }}
+                            {% if f.committed_cost and f.committed_cost > 0 %}
+                                <span class="text-warning">+ ${{ '{:,.0f}'.format(f.committed_cost) }} open</span>
+                            {% endif %}
+                            / ${{ '{:,.0f}'.format(f.total_contract) }}
                         </small>
                     </div>
                     {% set cost_pct = (f.total_costs / f.total_contract * 100) if f.total_contract > 0 else 0 %}
-                    {% if cost_pct > 100 %}{% set cost_pct_display = 100 %}{% else %}{% set cost_pct_display = cost_pct %}{% endif %}
-                    <div class="progress" style="height: 24px;">
-                        <div class="progress-bar {% if cost_pct > 90 %}bg-danger{% elif cost_pct > 70 %}bg-warning{% else %}bg-info{% endif %}"
-                             style="width: {{ cost_pct_display }}%">
-                            {{ '{:.0f}'.format(cost_pct) }}% Spent
+                    {% set committed_pct = (f.committed_cost / f.total_contract * 100) if f.total_contract > 0 and f.committed_cost else 0 %}
+                    {% set exposure_pct = cost_pct + committed_pct %}
+                    {% set billed_display = cost_pct if cost_pct <= 100 else 100 %}
+                    {% set committed_display = committed_pct if (cost_pct + committed_pct) <= 100 else (100 - billed_display if billed_display < 100 else 0) %}
+                    <div class="progress" style="height: 24px;"
+                         title="Billed ${{ '{:,.0f}'.format(f.total_costs) }} + Committed ${{ '{:,.0f}'.format(f.committed_cost or 0) }}">
+                        <div class="progress-bar {% if exposure_pct > 90 %}bg-danger{% elif exposure_pct > 70 %}bg-warning{% else %}bg-info{% endif %}"
+                             style="width: {{ billed_display }}%">
+                            {{ '{:.0f}'.format(cost_pct) }}% Billed
                         </div>
+                        {% if committed_display > 0 %}
+                        <div class="progress-bar bg-warning bg-opacity-50"
+                             style="width: {{ committed_display }}%">
+                            {{ '{:.0f}'.format(committed_pct) }}% Committed
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 {% endif %}
@@ -278,7 +356,7 @@
 
                 <!-- Quick Stats -->
                 <div class="row g-2 mt-3">
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Labor Hours</small>
@@ -286,7 +364,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Purchase Orders</small>
@@ -294,11 +372,22 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-4">
+                    <div class="col-3">
                         <div class="card border-0 bg-light text-center">
                             <div class="card-body py-2">
                                 <small class="text-muted d-block">Vendor Bills</small>
                                 <strong>{{ f.bills|length }}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <div class="card border-0 bg-light text-center"
+                             title="Uninvoiced portion of open POs">
+                            <div class="card-body py-2">
+                                <small class="text-muted d-block">Committed</small>
+                                <strong class="{% if f.committed_cost and f.committed_cost > 0 %}text-warning{% endif %}">
+                                    ${{ '{:,.0f}'.format(f.committed_cost or 0) }}
+                                </strong>
                             </div>
                         </div>
                     </div>
@@ -367,16 +456,21 @@
                             <td class="text-end fw-bold">${{ '{:,.2f}'.format(f.total_costs) }}</td>
                         </tr>
 
-                        <!-- PROFIT SECTION -->
+                        <!-- REALIZED PROFIT SECTION -->
                         <tr><td colspan="2" style="border-top: 3px double #000;" class="pt-3"></td></tr>
                         <tr>
-                            <td class="fw-bold fs-5">Gross Profit</td>
+                            <td class="fw-bold fs-5">
+                                Realized Gross Profit
+                                <small class="text-muted d-block fw-normal" style="font-size: 0.8rem;">
+                                    (based on billed costs only)
+                                </small>
+                            </td>
                             <td class="text-end fw-bold fs-5 {% if f.gross_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
                                 ${{ '{:,.2f}'.format(f.gross_profit) }}
                             </td>
                         </tr>
                         <tr>
-                            <td class="fw-bold">Margin %</td>
+                            <td class="fw-bold">Realized Margin %</td>
                             <td class="text-end fw-bold {% if f.margin_pct >= 0 %}text-success{% else %}text-danger{% endif %}">
                                 {{ '{:.1f}'.format(f.margin_pct) }}%
                             </td>
@@ -388,6 +482,36 @@
                                 <small class="text-muted">({% if f.billed_vs_costs >= 0 %}Over{% else %}Under{% endif %}-billed)</small>
                             </td>
                         </tr>
+
+                        <!-- PROJECTION SECTION (includes open POs) -->
+                        {% if f.committed_cost and f.committed_cost > 0 %}
+                        {% set projected_costs = f.total_costs + f.committed_cost %}
+                        {% set projected_gp = f.total_contract - projected_costs %}
+                        {% set projected_margin = (projected_gp / f.total_contract * 100) if f.total_contract > 0 else 0 %}
+                        <tr><td colspan="2" class="fw-bold text-uppercase pt-4 pb-1" style="border-bottom: 2px solid #000; letter-spacing: 1px;">
+                            Projection <small class="text-muted text-capitalize fw-normal">(with open POs)</small>
+                        </td></tr>
+                        <tr>
+                            <td class="ps-3 text-warning">Open PO Commitments</td>
+                            <td class="text-end text-warning">${{ '{:,.2f}'.format(f.committed_cost) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="ps-3">Projected Total Costs</td>
+                            <td class="text-end">${{ '{:,.2f}'.format(projected_costs) }}</td>
+                        </tr>
+                        <tr style="border-top: 1px solid #999;">
+                            <td class="fw-bold ps-3">Projected Gross Profit</td>
+                            <td class="text-end fw-bold {% if projected_gp >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                ${{ '{:,.2f}'.format(projected_gp) }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold ps-3">Projected Margin %</td>
+                            <td class="text-end fw-bold {% if projected_margin >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ '{:.1f}'.format(projected_margin) }}%
+                            </td>
+                        </tr>
+                        {% endif %}
 
                         <!-- PER SQ FT -->
                         {% if f.sq_ft > 0 %}
@@ -414,10 +538,25 @@
     <!-- TIMESHEETS TAB -->
     <div class="tab-pane fade p-0" id="tabTimesheets">
         {% if detail.timesheets %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search timesheets…"
+                       data-inpage-filter="#timesheetsTable"
+                       data-inpage-count="#timesheetsCount">
+            </label>
+            <span class="list-meta">Showing <strong id="timesheetsCount">{{ detail.timesheets|length }}</strong> entries</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="timesheetsTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Date</th><th>Description</th><th>Employee</th><th class="text-end">Hours</th><th class="text-end">Cost</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="date">Date</th>
+                        <th data-sort-col="1" data-sort-type="text">Description</th>
+                        <th data-sort-col="2" data-sort-type="text">Employee</th>
+                        <th data-sort-col="3" data-sort-type="hours" class="text-end">Hours</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end">Cost</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for line in detail.timesheets %}
@@ -425,11 +564,18 @@
                         <td>{{ line.date }}</td>
                         <td>{{ line.name[:60] }}{% if line.name|length > 60 %}...{% endif %}</td>
                         <td>{% if line.employee_id %}{{ line.employee_id[1] if line.employee_id is iterable and line.employee_id is not string else line.employee_id }}{% else %}-{% endif %}</td>
-                        <td class="text-end">{{ line.unit_amount_fmt }}</td>
-                        <td class="text-end">${{ '%.2f'|format((line.amount or 0)|abs) }}</td>
+                        <td class="text-end" data-value="{{ line.unit_amount or 0 }}">{{ line.unit_amount_fmt }}</td>
+                        <td class="text-end" data-value="{{ (line.amount or 0)|abs }}">${{ '%.2f'|format((line.amount or 0)|abs) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="hours" class="text-end fw-bold"></td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -440,10 +586,25 @@
     <!-- SALES ORDERS TAB -->
     <div class="tab-pane fade p-0" id="tabSalesOrders">
         {% if detail.sales_orders %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search sales orders…"
+                       data-inpage-filter="#salesOrdersTable"
+                       data-inpage-count="#salesOrdersCount">
+            </label>
+            <span class="list-meta">Showing <strong id="salesOrdersCount">{{ detail.sales_orders|length }}</strong> sales orders</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="salesOrdersTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Order #</th><th>Customer</th><th>Date</th><th class="text-end">Amount</th><th>Status</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">Order #</th>
+                        <th data-sort-col="1" data-sort-type="text">Customer</th>
+                        <th data-sort-col="2" data-sort-type="date">Date</th>
+                        <th data-sort-col="3" data-sort-type="currency" class="text-end">Amount</th>
+                        <th data-sort-col="4" data-sort-type="text">Status</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for so in detail.sales_orders %}
@@ -451,7 +612,7 @@
                         <td><strong>{{ so.name or '-' }}</strong></td>
                         <td>{{ so.partner_name }}</td>
                         <td>{{ so.display_date }}</td>
-                        <td class="text-end">${{ '%.2f'|format(so.amount_total or 0) }}</td>
+                        <td class="text-end" data-value="{{ so.amount_total or 0 }}">${{ '%.2f'|format(so.amount_total or 0) }}</td>
                         <td>
                             {% if so.state == 'sale' %}<span class="badge bg-success">Confirmed</span>
                             {% elif so.state == 'done' %}<span class="badge bg-primary">Done</span>
@@ -462,6 +623,13 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -472,10 +640,29 @@
     <!-- PURCHASE ORDERS TAB -->
     <div class="tab-pane fade p-0" id="tabPurchaseOrders">
         {% if detail.purchase_orders %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search POs by number or vendor…"
+                       data-inpage-filter="#purchaseOrdersTable"
+                       data-inpage-count="#purchaseOrdersCount">
+            </label>
+            <span class="list-meta">Showing <strong id="purchaseOrdersCount">{{ detail.purchase_orders|length }}</strong> purchase orders</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="purchaseOrdersTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>PO #</th><th>Vendor</th><th>Date</th><th class="text-end">Amount</th><th>Status</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">PO #</th>
+                        <th data-sort-col="1" data-sort-type="text">Vendor</th>
+                        <th data-sort-col="2" data-sort-type="date">Date</th>
+                        <th data-sort-col="3" data-sort-type="currency" class="text-end"
+                            title="PO line total attributed to this job by analytic distribution">Attributed</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end"
+                            title="Uninvoiced portion: (qty − qty_invoiced) × price × pct">Committed</th>
+                        <th data-sort-col="5" data-sort-type="text">Status</th>
+                        <th data-sort-col="6" data-sort-type="text">Billing</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for po in detail.purchase_orders %}
@@ -483,7 +670,11 @@
                         <td><strong>{{ po.name or '-' }}</strong></td>
                         <td>{{ po.partner_name }}</td>
                         <td>{{ po.display_date }}</td>
-                        <td class="text-end">${{ '%.2f'|format(po.amount_total or 0) }}</td>
+                        <td class="text-end" data-value="{{ po.attributed_amount or 0 }}">${{ '{:,.2f}'.format(po.attributed_amount or 0) }}</td>
+                        <td class="text-end {% if po.committed_amount and po.committed_amount > 0 %}text-warning fw-semibold{% endif %}"
+                            data-value="{{ po.committed_amount or 0 }}">
+                            ${{ '{:,.2f}'.format(po.committed_amount or 0) }}
+                        </td>
                         <td>
                             {% if po.state == 'purchase' %}<span class="badge bg-success">Confirmed</span>
                             {% elif po.state == 'done' %}<span class="badge bg-primary">Done</span>
@@ -491,9 +682,23 @@
                             {% elif po.state == 'cancel' %}<span class="badge bg-dark">Cancelled</span>
                             {% else %}<span class="badge bg-secondary">{{ po.state or '-' }}</span>{% endif %}
                         </td>
+                        <td>
+                            {% if po.invoice_status == 'invoiced' %}<span class="badge bg-success">Fully Billed</span>
+                            {% elif po.invoice_status == 'to invoice' %}<span class="badge bg-warning text-dark">To Bill</span>
+                            {% elif po.invoice_status == 'no' %}<span class="badge bg-secondary">Nothing to Bill</span>
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="3" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="3" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -504,10 +709,27 @@
     <!-- INVOICES TAB -->
     <div class="tab-pane fade p-0" id="tabInvoices">
         {% if detail.invoices %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search invoices…"
+                       data-inpage-filter="#invoicesTable"
+                       data-inpage-count="#invoicesCount">
+            </label>
+            <span class="list-meta">Showing <strong id="invoicesCount">{{ detail.invoices|length }}</strong> invoices</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="invoicesTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Invoice #</th><th>Type</th><th>Customer</th><th>Date</th><th class="text-end">Total</th><th class="text-end">Due</th><th>Payment</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">Invoice #</th>
+                        <th data-sort-col="1" data-sort-type="text">Type</th>
+                        <th data-sort-col="2" data-sort-type="text">Customer</th>
+                        <th data-sort-col="3" data-sort-type="date">Date</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end">Total</th>
+                        <th data-sort-col="5" data-sort-type="currency" class="text-end">Due</th>
+                        <th data-sort-col="6" data-sort-type="text">Payment</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for inv in detail.invoices %}
@@ -516,8 +738,9 @@
                         <td>{% if inv.move_type == 'out_refund' %}<span class="badge bg-warning text-dark">Credit Note</span>{% else %}Invoice{% endif %}</td>
                         <td>{{ inv.partner_name }}</td>
                         <td>{{ inv.display_date }}</td>
-                        <td class="text-end">{% if inv.move_type == 'out_refund' %}-{% endif %}${{ '%.2f'|format(inv.amount_total or 0) }}</td>
-                        <td class="text-end">${{ '%.2f'|format(inv.amount_residual or 0) }}</td>
+                        {% set inv_signed = -(inv.amount_total or 0) if inv.move_type == 'out_refund' else (inv.amount_total or 0) %}
+                        <td class="text-end" data-value="{{ inv_signed }}">{% if inv.move_type == 'out_refund' %}-{% endif %}${{ '%.2f'|format(inv.amount_total or 0) }}</td>
+                        <td class="text-end" data-value="{{ inv.amount_residual or 0 }}">${{ '%.2f'|format(inv.amount_residual or 0) }}</td>
                         <td>
                             {% if inv.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
                             {% elif inv.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
@@ -527,6 +750,14 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="4" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="5" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}
@@ -537,20 +768,46 @@
     <!-- BILLS TAB -->
     <div class="tab-pane fade p-0" id="tabBills">
         {% if detail.bills %}
+        <div class="inpage-toolbar">
+            <label class="list-search">
+                <i class="bi bi-search"></i>
+                <input type="text" placeholder="Search bills…"
+                       data-inpage-filter="#billsTable"
+                       data-inpage-count="#billsCount">
+            </label>
+            <span class="list-meta">Showing <strong id="billsCount">{{ detail.bills|length }}</strong> bills</span>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <table id="billsTable" class="table table-sm table-hover mb-0" data-inpage-sort>
                 <thead class="table-light">
-                    <tr><th>Bill #</th><th>Type</th><th>Vendor</th><th>Date</th><th class="text-end">Total</th><th class="text-end">Due</th><th>Payment</th></tr>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text">Bill #</th>
+                        <th data-sort-col="1" data-sort-type="text">Type</th>
+                        <th data-sort-col="2" data-sort-type="text">Vendor</th>
+                        <th data-sort-col="3" data-sort-type="date">Date</th>
+                        <th data-sort-col="4" data-sort-type="currency" class="text-end"
+                            title="Portion of the bill total attributed to this job by analytic distribution">Attributed</th>
+                        <th data-sort-col="5" data-sort-type="currency" class="text-end">Total</th>
+                        <th data-sort-col="6" data-sort-type="currency" class="text-end">Due</th>
+                        <th data-sort-col="7" data-sort-type="text">Payment</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for bill in detail.bills %}
+                    {% set bill_attr_signed = -(bill.attributed_amount or bill.amount_total or 0) if bill.move_type == 'in_refund' else (bill.attributed_amount or bill.amount_total or 0) %}
+                    {% set bill_total_signed = -(bill.amount_total or 0) if bill.move_type == 'in_refund' else (bill.amount_total or 0) %}
                     <tr {% if bill.move_type == 'in_refund' %}class="table-info"{% endif %}>
                         <td><strong>{{ bill.name or '-' }}</strong></td>
                         <td>{% if bill.move_type == 'in_refund' %}<span class="badge bg-info">Refund</span>{% else %}Bill{% endif %}</td>
                         <td>{{ bill.partner_name }}</td>
                         <td>{{ bill.display_date }}</td>
-                        <td class="text-end">{% if bill.move_type == 'in_refund' %}-{% endif %}${{ '%.2f'|format(bill.amount_total or 0) }}</td>
-                        <td class="text-end">${{ '%.2f'|format(bill.amount_residual or 0) }}</td>
+                        <td class="text-end fw-semibold" data-value="{{ bill_attr_signed }}">
+                            {% if bill.move_type == 'in_refund' %}-{% endif %}${{ '{:,.2f}'.format(bill.attributed_amount or bill.amount_total or 0) }}
+                        </td>
+                        <td class="text-end text-muted" data-value="{{ bill_total_signed }}">
+                            {% if bill.move_type == 'in_refund' %}-{% endif %}${{ '{:,.2f}'.format(bill.amount_total or 0) }}
+                        </td>
+                        <td class="text-end" data-value="{{ bill.amount_residual or 0 }}">${{ '{:,.2f}'.format(bill.amount_residual or 0) }}</td>
                         <td>
                             {% if bill.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
                             {% elif bill.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
@@ -560,6 +817,15 @@
                     </tr>
                     {% endfor %}
                 </tbody>
+                <tfoot>
+                    <tr data-totals-row class="totals-row">
+                        <td colspan="4" class="fw-bold">Totals (filtered)</td>
+                        <td data-total-col="4" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="5" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td data-total-col="6" data-total-format="currency" class="text-end fw-bold"></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         {% else %}

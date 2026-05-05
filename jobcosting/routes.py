@@ -21,39 +21,62 @@ def dashboard():
 # Analytic Entries (still useful for viewing/creating line items)
 # ---------------------------------------------------------------------------
 
+from common.list_query import (
+    parse_list_query, search_facet, m2o_facet, date_range_facet,
+)
+from common.list_totals import compute_list_totals
+
+
+ENTRIES_SORT_MAP = {
+    'date': 'date',
+    'amount': 'amount',
+    'hours': 'unit_amount',
+    'name': 'name',
+    'project': 'project_id',
+    'employee': 'employee_id',
+}
+
+
 @bp.route('/entries')
 @odoo_user_required
 def entries():
-    """Browse analytic items with filters."""
+    """Paginated analytic-items list with multi-facet filtering + totals."""
     odoo = current_app.odoo
 
-    account_id = request.args.get('account_id', type=int)
-    date_from_str = request.args.get('date_from', '')
-    date_to_str = request.args.get('date_to', '')
-
-    date_from = None
-    date_to = None
-    if date_from_str:
-        try:
-            date_from = date.fromisoformat(date_from_str)
-        except ValueError:
-            pass
-    if date_to_str:
-        try:
-            date_to = date.fromisoformat(date_to_str)
-        except ValueError:
-            pass
-
-    lines = []
     account_list = []
-
     try:
         account_list = services.get_analytic_accounts(odoo)
-        lines = services.get_analytic_lines(
+    except OdooConnectionError as e:
+        flash(f'Cannot connect to Odoo: {e}', 'danger')
+    except OdooAPIError as e:
+        flash(f'Odoo error: {e}', 'danger')
+
+    account_options = [(a['id'], a['name']) for a in account_list]
+
+    facets = [
+        search_facet('q', ['name'], placeholder='Search description…'),
+        m2o_facet('account_id', 'account_id', options=account_options, label='Account'),
+        date_range_facet('date_from', 'date_to', 'date'),
+    ]
+
+    query = parse_list_query(
+        request.args, facets, ENTRIES_SORT_MAP,
+        default_sort='date_desc',
+    )
+
+    lines = []
+    totals = {'count': 0, 'sums': {'amount': 0.0, 'unit_amount': 0.0}}
+    try:
+        lines, full_domain = services.get_analytic_lines_paginated(
             odoo,
-            account_id=account_id,
-            date_from=date_from,
-            date_to=date_to,
+            domain=query['domain'],
+            order=query['order'],
+            offset=query['offset'],
+            limit=query['limit'],
+        )
+        totals = compute_list_totals(
+            odoo, 'account.analytic.line', full_domain,
+            sum_fields=['amount', 'unit_amount'],
         )
     except OdooConnectionError as e:
         flash(f'Cannot connect to Odoo: {e}', 'danger')
@@ -63,12 +86,10 @@ def entries():
     return render_template(
         'jobcosting/entries.html',
         lines=lines,
-        projects=[],
+        facets=facets,
+        query=query,
+        totals=totals,
         accounts=account_list,
-        selected_project_id=None,
-        selected_account_id=account_id,
-        date_from=date_from,
-        date_to=date_to,
     )
 
 
@@ -178,6 +199,7 @@ def jobs_dashboard():
         columns=data.get('columns', []),
         jobs=data.get('jobs', []),
         status_options=data.get('status_options', []),
+        status_counts=data.get('status_counts', {}),
         default_status=data.get('default_status', 'In Progress'),
     )
 
@@ -206,6 +228,80 @@ def job_detail(account_id):
         return redirect(url_for('jobcosting.jobs_dashboard'))
 
     return render_template('jobcosting/job_detail.html', detail=detail)
+
+
+@bp.route('/job/<int:account_id>/progress-bill', methods=['GET', 'POST'])
+@odoo_user_required
+def progress_bill(account_id):
+    """Create a progress-billing invoice for this job.
+
+    GET shows the form (pre-filled with customer + billing context).
+    POST validates amount & milestone, calls create_progress_bill(),
+    then jumps to the resulting draft invoice so the user can review,
+    attach files, and post.
+    """
+    from accounting import transactions
+
+    odoo = current_app.odoo
+
+    detail = None
+    try:
+        detail = services.get_job_detail(odoo, account_id)
+    except Exception as e:
+        flash(f'Error loading job: {e}', 'danger')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    if not detail:
+        flash('Job not found.', 'warning')
+        return redirect(url_for('jobcosting.jobs_dashboard'))
+
+    billing = detail['billing']
+
+    if request.method == 'POST':
+        try:
+            milestone = (request.form.get('milestone') or '').strip()
+            amount = request.form.get('amount', type=float) or 0.0
+            invoice_date = request.form.get('invoice_date') or date.today().isoformat()
+            extra_notes = request.form.get('extra_notes', '')
+
+            if not milestone:
+                flash('Milestone label is required.', 'warning')
+                return redirect(request.path)
+            if amount <= 0:
+                flash('Amount must be greater than zero.', 'warning')
+                return redirect(request.path)
+            if not billing.get('customer_id'):
+                flash('This job has no linked customer — set one on a sales '
+                      'order first, or create the invoice manually.',
+                      'danger')
+                return redirect(request.path)
+
+            move_id = transactions.create_progress_bill(
+                odoo,
+                partner_id=billing['customer_id'],
+                analytic_id=account_id,
+                milestone=milestone,
+                amount=amount,
+                invoice_date=invoice_date,
+                contract=billing['contract'],
+                previously_billed=billing['billed'],
+                previously_paid=billing['paid'],
+                extra_notes=extra_notes,
+            )
+            flash('Progress bill created as draft. Review and post when ready.',
+                  'success')
+            return redirect(url_for('accounting.view_move', move_id=move_id))
+        except Exception as e:
+            current_app.logger.exception('Error creating progress bill')
+            flash(f'Error creating progress bill: {e}', 'danger')
+
+    return render_template(
+        'jobcosting/progress_bill.html',
+        detail=detail,
+        billing=billing,
+        today=date.today().isoformat(),
+        next_number=billing.get('progress_bill_count', 0) + 1,
+    )
 
 
 @bp.route('/job/<int:account_id>/save', methods=['POST'])
@@ -390,3 +486,131 @@ def export_data(report_type):
     except Exception as e:
         flash(f'Export error: {e}', 'danger')
         return redirect(url_for('jobcosting.jobs_dashboard'))
+
+
+@bp.route('/debug/analytic/<int:account_id>')
+@odoo_user_required
+def debug_analytic(account_id):
+    """Diagnostic: dump the analytic account + raw PO/bill line samples
+    so we can see exactly how Odoo serialises analytic_distribution for
+    this install. Used to debug empty PO/Bills tabs.
+    """
+    odoo = current_app.odoo
+    out = {'account_id': account_id}
+
+    try:
+        acct = odoo.search_read(
+            'account.analytic.account',
+            [('id', '=', account_id)],
+            fields=['id', 'name', 'code', 'plan_id', 'partner_id'],
+        )
+        out['account'] = acct[0] if acct else None
+    except Exception as e:
+        out['account_error'] = str(e)
+
+    # Find the project linked to this analytic (or any analytic that
+    # shares a name with this one). This helps identify multi-plan setups.
+    try:
+        out['projects_linked_here'] = odoo.search_read(
+            'project.project',
+            [('analytic_account_id', '=', account_id)],
+            fields=['id', 'name', 'analytic_account_id'],
+        )
+    except Exception as e:
+        out['projects_error'] = str(e)
+
+    # List every analytic account with the same name (catches the case
+    # where an id mismatch is the cause).
+    try:
+        if out.get('account'):
+            out['same_name_accounts'] = odoo.search_read(
+                'account.analytic.account',
+                [('name', '=', out['account']['name'])],
+                fields=['id', 'name', 'code', 'plan_id'],
+            )
+    except Exception as e:
+        out['same_name_error'] = str(e)
+
+    # Sample raw PO lines that substring-match this id.
+    try:
+        out['po_line_sample'] = odoo.search_read(
+            'purchase.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'order_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['po_line_error'] = str(e)
+
+    # Sample raw move lines that substring-match this id.
+    try:
+        out['move_line_sample'] = odoo.search_read(
+            'account.move.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'move_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['move_line_error'] = str(e)
+
+    # Show the first few PO lines in the system that HAVE any
+    # analytic_distribution — so we can see the real key format.
+    try:
+        out['any_po_line_with_distribution'] = odoo.search_read(
+            'purchase.order.line',
+            [('analytic_distribution', '!=', False)],
+            fields=['id', 'order_id', 'analytic_distribution'],
+            limit=5,
+        )
+    except Exception as e:
+        out['any_po_line_error'] = str(e)
+
+    # SO lines tagged to this analytic — used to trace POs through sale_line_id.
+    so_line_ids = []
+    try:
+        raw_so = odoo.search_read(
+            'sale.order.line',
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=['id', 'order_id', 'name', 'analytic_distribution'],
+            limit=100,
+        )
+        verified = [
+            l for l in raw_so
+            if services._distribution_pct(account_id, l.get('analytic_distribution')) > 0
+        ]
+        so_line_ids = [l['id'] for l in verified]
+        out['so_lines_for_this_analytic_count'] = len(verified)
+        out['so_lines_sample'] = verified[:3]
+    except Exception as e:
+        out['so_lines_error'] = str(e)
+
+    # PO lines linked to those SO lines via sale_line_id.
+    if so_line_ids:
+        try:
+            po_via_so = odoo.search_read(
+                'purchase.order.line',
+                [('sale_line_id', 'in', so_line_ids)],
+                fields=['id', 'order_id', 'sale_line_id',
+                        'analytic_distribution', 'price_subtotal',
+                        'product_qty', 'qty_invoiced', 'price_unit'],
+                limit=100,
+            )
+            out['po_lines_via_sale_line_count'] = len(po_via_so)
+            out['po_lines_via_sale_line_sample'] = po_via_so[:5]
+        except Exception as e:
+            out['po_via_sale_line_error'] = str(e)
+
+    # Which PO line fields exist on this install (helps spot direct linkage
+    # fields like project_id, task_id added by enterprise modules).
+    try:
+        fields_def = odoo.fields_get('purchase.order.line')
+        interesting = sorted(
+            name for name in fields_def
+            if any(k in name.lower()
+                   for k in ['project', 'task', 'analytic', 'sale_line', 'account_'])
+        )
+        out['po_line_interesting_fields'] = interesting
+    except Exception as e:
+        out['po_fields_error'] = str(e)
+
+    return jsonify(out)

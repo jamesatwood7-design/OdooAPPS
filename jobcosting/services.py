@@ -1,8 +1,38 @@
+import logging
+
 from common.utils import date_to_odoo, odoo_to_date, format_duration, format_many2one
 from jobcosting.field_mapping import (
     resolve_dashboard_columns, resolve_detail_sections, format_odoo_value,
     resolve_status_field, get_custom_field_map, resolve_field,
 )
+
+logger = logging.getLogger(__name__)
+
+PO_OPEN_STATES = ('purchase', 'done')
+
+
+def _distribution_pct(account_id, dist):
+    """Return the percentage this analytic account gets from a distribution dict.
+
+    Handles Odoo 17 compound keys used when Analytic Plans are enabled —
+    e.g. ``{"24,42": 100.0}`` means this line is tagged to account 24 AND
+    account 42 simultaneously, each receiving 100% of the line's value.
+    Each comma-separated part is matched independently so a prefix like
+    "24" does not false-match "242" or "24,42"-as-a-whole.
+    """
+    if not isinstance(dist, dict):
+        return 0.0
+    key = str(account_id)
+    total = 0.0
+    for compound_key, pct in dist.items():
+        parts = [part.strip() for part in str(compound_key).split(',')]
+        if key not in parts:
+            continue
+        try:
+            total += float(pct)
+        except (TypeError, ValueError):
+            continue
+    return total
 
 
 def get_analytic_accounts(odoo, domain=None):
@@ -56,7 +86,11 @@ def get_tasks_for_project(odoo, project_id):
 
 def get_analytic_lines(odoo, account_id=None, project_id=None,
                        date_from=None, date_to=None, limit=100):
-    """Get analytic items with filters."""
+    """Backwards-compatible single-call fetch of analytic items.
+
+    Kept for tests and callers that don't need pagination. The Entries
+    list page uses get_analytic_lines_paginated() instead.
+    """
     domain = []
     if account_id:
         domain.append(('account_id', '=', account_id))
@@ -76,12 +110,34 @@ def get_analytic_lines(odoo, account_id=None, project_id=None,
         order='date desc',
         limit=limit,
     )
-
     for rec in records:
         rec['unit_amount_fmt'] = format_duration(rec.get('unit_amount'))
         rec['date_obj'] = odoo_to_date(rec.get('date'))
-
     return records
+
+
+def get_analytic_lines_paginated(odoo, domain=None, order=None,
+                                 offset=0, limit=50):
+    """Paginated analytic items for the Entries list page.
+
+    Returns (records, domain_used). The caller feeds domain_used to
+    compute_list_totals() for the footer totals.
+    """
+    full_domain = list(domain or [])
+    records = odoo.safe_search_read(
+        'account.analytic.line', full_domain,
+        fields=[
+            'id', 'name', 'date', 'amount', 'unit_amount',
+            'employee_id', 'project_id', 'task_id', 'account_id',
+        ],
+        order=order or 'date desc',
+        offset=offset,
+        limit=limit,
+    )
+    for rec in records:
+        rec['unit_amount_fmt'] = format_duration(rec.get('unit_amount'))
+        rec['date_obj'] = odoo_to_date(rec.get('date'))
+    return records, full_domain
 
 
 def get_employees(odoo):
@@ -404,13 +460,15 @@ def get_job_dashboard_data(odoo):
             })
         formatted_jobs.append(row)
 
-    # Get unique status values for the filter bar
-    status_values = sorted(set(j['status'] for j in formatted_jobs if j['status']))
+    from collections import Counter
+    status_counts = Counter(j['status'] for j in formatted_jobs if j['status'])
+    status_values = sorted(status_counts.keys())
 
     return {
-        'columns': [(c[0], c[2]) for c in columns],  # (label, sort_type)
+        'columns': [(c[0], c[2]) for c in columns],
         'jobs': formatted_jobs,
         'status_options': status_values,
+        'status_counts': dict(status_counts),
         'default_status': 'In Progress',
     }
 
@@ -433,26 +491,29 @@ def _fetch_orders_by_ids(odoo, model, order_ids):
 
 
 def _find_orders_via_analytic_distribution(odoo, line_model, account_id):
-    """Try to find order IDs via analytic_distribution on order lines."""
+    """Find order IDs via analytic_distribution on order lines (no state filter)."""
     try:
-        lines = odoo.search_read(
-            line_model,
-            [('analytic_distribution', 'ilike', str(account_id))],
+        lines = _search_lines_by_analytic(
+            odoo, line_model, account_id,
             fields=['order_id', 'analytic_distribution'],
-            limit=500,
         )
-        order_ids = set()
-        for line in lines:
-            dist = line.get('analytic_distribution')
-            if isinstance(dist, dict) and str(account_id) in dist:
-                oid = line.get('order_id')
-                if isinstance(oid, (list, tuple)):
-                    order_ids.add(oid[0])
-                elif oid:
-                    order_ids.add(oid)
-        return order_ids
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            '%s lookup via analytic_distribution failed for account_id=%s: %s',
+            line_model, account_id, exc,
+        )
         return set()
+
+    order_ids = set()
+    for line in lines:
+        if _distribution_pct(account_id, line.get('analytic_distribution')) <= 0:
+            continue
+        oid = line.get('order_id')
+        if isinstance(oid, (list, tuple)):
+            order_ids.add(oid[0])
+        elif oid:
+            order_ids.add(oid)
+    return order_ids
 
 
 def _find_orders_via_invoices(odoo, moves, order_model):
@@ -500,63 +561,226 @@ def get_sales_orders(odoo, account_id, invoices=None):
     if not order_ids and invoices:
         order_ids = _find_orders_via_invoices(odoo, invoices, 'sale.order')
 
-    # Strategy 3: analytic_account_id on SO lines
-    if not order_ids:
-        try:
-            lines = odoo.search_read(
-                'sale.order.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['order_id'],
-                limit=500,
-            )
-            for line in lines:
-                oid = line.get('order_id')
-                if isinstance(oid, (list, tuple)):
-                    order_ids.add(oid[0])
-                elif oid:
-                    order_ids.add(oid)
-        except Exception:
-            pass
-
     return _fetch_orders_by_ids(odoo, 'sale.order', order_ids)
 
 
-def get_purchase_orders(odoo, account_id, bills=None):
-    """Get Purchase Orders linked to an analytic account.
+def _search_lines_by_analytic(odoo, model, account_id, fields):
+    """Fetch `model` lines tagged to an analytic account.
 
-    Tries multiple strategies:
-    1. analytic_distribution on purchase.order.line
-    2. Trace back from vendor bills via invoice_origin
-    3. analytic_account_id on purchase.order.line
+    Primary: `distribution_analytic_account_ids` Many2many — the canonical
+    searchable field added by Odoo 17's analytic_mixin. Every line model
+    (purchase.order.line, account.move.line, sale.order.line) inherits it.
+
+    Fallback: `analytic_distribution` ilike — kept for installs that don't
+    expose the Many2many (older 17 backports, custom strippings).
     """
-    order_ids = set()
+    try:
+        return odoo.search_read(
+            model,
+            [('distribution_analytic_account_ids', 'in', [account_id])],
+            fields=fields,
+            limit=2000,
+        )
+    except Exception as exc:
+        logger.warning(
+            '%s search via distribution_analytic_account_ids failed for '
+            'account_id=%s, falling back to analytic_distribution ilike: %s',
+            model, account_id, exc,
+        )
+        return odoo.search_read(
+            model,
+            [('analytic_distribution', 'ilike', str(account_id))],
+            fields=fields,
+            limit=2000,
+        )
 
-    # Strategy 1: analytic_distribution on PO lines
-    order_ids = _find_orders_via_analytic_distribution(
-        odoo, 'purchase.order.line', account_id
+
+def _po_lines_for_analytic(odoo, account_id):
+    """Open PO lines tagged to this analytic account, with attribution.
+
+    Two-phase lookup to stay resilient against API-user permission gaps:
+      1. Scan `purchase.order.line` matched by `analytic_distribution ilike`.
+      2. Batch-fetch parent PO states and drop lines whose order isn't in
+         PO_OPEN_STATES (('purchase','done')).
+
+    Each returned dict adds:
+      - distribution_pct  (0-100)
+      - attributed_amount (price_subtotal * pct/100)
+      - committed_amount  ((product_qty - qty_invoiced) * price_unit * pct/100)
+
+    `qty_invoiced` is financial exposure (what we still owe the vendor).
+    See docs/decisions/odoo-cost-data-layers.md.
+    """
+    raw_lines = _search_lines_by_analytic(
+        odoo, 'purchase.order.line', account_id,
+        fields=['id', 'order_id', 'product_id', 'name',
+                'product_qty', 'qty_invoiced', 'price_unit',
+                'price_subtotal', 'analytic_distribution'],
     )
 
-    # Strategy 2: trace from bills
-    if not order_ids and bills:
-        order_ids = _find_orders_via_invoices(odoo, bills, 'purchase.order')
+    matched = []
+    order_ids = set()
+    for line in raw_lines:
+        dist = line.get('analytic_distribution')
+        pct_value = _distribution_pct(account_id, dist)
+        if pct_value <= 0:
+            continue
+        order_raw = line.get('order_id')
+        order_pk = order_raw[0] if isinstance(order_raw, (list, tuple)) else order_raw
+        if not order_pk:
+            continue
+        pct_share = pct_value / 100.0
+        qty_open = max(
+            0.0,
+            (line.get('product_qty') or 0.0) - (line.get('qty_invoiced') or 0.0),
+        )
+        line['order_pk'] = order_pk
+        line['distribution_pct'] = pct_value
+        line['attributed_amount'] = (line.get('price_subtotal') or 0.0) * pct_share
+        line['committed_amount'] = qty_open * (line.get('price_unit') or 0.0) * pct_share
+        order_ids.add(order_pk)
+        matched.append(line)
 
-    # Strategy 3: analytic_account_id on PO lines
-    if not order_ids:
-        try:
-            lines = odoo.search_read(
-                'purchase.order.line',
-                [('analytic_account_id', '=', account_id)],
-                fields=['order_id'],
-                limit=500,
+    if not matched:
+        if raw_lines:
+            logger.warning(
+                'PO line search for account_id=%s returned %d rows but none '
+                'matched after distribution verification; sample keys=%s',
+                account_id, len(raw_lines),
+                [list((rl.get('analytic_distribution') or {}).keys())
+                 for rl in raw_lines[:3]],
             )
-            for line in lines:
-                oid = line.get('order_id')
-                if isinstance(oid, (list, tuple)):
-                    order_ids.add(oid[0])
-                elif oid:
-                    order_ids.add(oid)
-        except Exception:
-            pass
+        else:
+            logger.info(
+                'PO line search for account_id=%s returned 0 rows. The account '
+                'may not appear in any purchase.order.line.analytic_distribution. '
+                'Hit /jobcosting/debug/analytic/%s to inspect.',
+                account_id, account_id,
+            )
+        return []
+
+    state_rows = odoo.search_read(
+        'purchase.order',
+        [('id', 'in', list(order_ids))],
+        fields=['id', 'state'],
+    )
+    open_ids = {r['id'] for r in state_rows if r.get('state') in PO_OPEN_STATES}
+    return [line for line in matched if line['order_pk'] in open_ids]
+
+
+def _bill_lines_for_analytic(odoo, account_id):
+    """Posted vendor-bill (and refund) lines tagged to this analytic, with attribution.
+
+    Two-phase lookup: line scan by analytic_distribution first, then batch
+    fetch of parent `account.move` records to filter to posted vendor moves
+    and mark refund lines.
+
+    Each returned dict adds:
+      - distribution_pct  (0-100)
+      - attributed_amount (price_subtotal * pct/100)
+      - is_refund         (True for in_refund moves)
+      - move_pk           (the parent move id)
+    """
+    raw_lines = _search_lines_by_analytic(
+        odoo, 'account.move.line', account_id,
+        fields=['id', 'move_id', 'name', 'price_subtotal', 'analytic_distribution'],
+    )
+
+    candidates = []
+    move_ids = set()
+    for line in raw_lines:
+        dist = line.get('analytic_distribution')
+        pct_value = _distribution_pct(account_id, dist)
+        if pct_value <= 0:
+            continue
+        mv = line.get('move_id')
+        move_pk = mv[0] if isinstance(mv, (list, tuple)) else mv
+        if not move_pk:
+            continue
+        pct_share = pct_value / 100.0
+        line['move_pk'] = move_pk
+        line['distribution_pct'] = pct_value
+        line['attributed_amount'] = (line.get('price_subtotal') or 0.0) * pct_share
+        move_ids.add(move_pk)
+        candidates.append(line)
+
+    if not candidates:
+        if raw_lines:
+            logger.warning(
+                'Move line search for account_id=%s returned %d rows but none '
+                'matched after distribution verification; sample keys=%s',
+                account_id, len(raw_lines),
+                [list((rl.get('analytic_distribution') or {}).keys())
+                 for rl in raw_lines[:3]],
+            )
+        else:
+            logger.info(
+                'Move line search for account_id=%s returned 0 rows.',
+                account_id,
+            )
+        return []
+
+    moves = odoo.search_read(
+        'account.move',
+        [('id', 'in', list(move_ids))],
+        fields=['id', 'move_type', 'state'],
+    )
+    info_by_move = {m['id']: m for m in moves}
+
+    matched = []
+    for line in candidates:
+        info = info_by_move.get(line.get('move_pk')) or {}
+        if info.get('state') != 'posted':
+            continue
+        if info.get('move_type') not in ('in_invoice', 'in_refund'):
+            continue
+        line['is_refund'] = info.get('move_type') == 'in_refund'
+        matched.append(line)
+    return matched
+
+
+def get_purchase_orders(odoo, account_id, bills=None):
+    """Open Purchase Orders linked to an analytic account, with attribution.
+
+    Primary strategy: analytic_distribution on purchase.order.line, restricted
+    to PO state in ('purchase','done'). Each returned PO is enriched with
+    `attributed_amount` and `committed_amount` summed across its matching lines.
+
+    Fallbacks (no attribution available): trace via invoice_origin on bills,
+    legacy analytic_account_id field on PO lines.
+    """
+    primary_lines = []
+    try:
+        primary_lines = _po_lines_for_analytic(odoo, account_id)
+    except Exception as exc:
+        logger.warning(
+            'PO line lookup via analytic_distribution failed for account_id=%s: %s',
+            account_id, exc,
+        )
+
+    if primary_lines:
+        sums = {}
+        for line in primary_lines:
+            oid_raw = line.get('order_id')
+            oid = oid_raw[0] if isinstance(oid_raw, (list, tuple)) else oid_raw
+            if not oid:
+                continue
+            slot = sums.setdefault(oid, {'attributed': 0.0, 'committed': 0.0, 'lines': 0})
+            slot['attributed'] += line.get('attributed_amount', 0.0)
+            slot['committed'] += line.get('committed_amount', 0.0)
+            slot['lines'] += 1
+
+        orders = _fetch_orders_by_ids(odoo, 'purchase.order', set(sums.keys()))
+        for order in orders:
+            slot = sums.get(order['id'], {})
+            order['attributed_amount'] = slot.get('attributed', 0.0)
+            order['committed_amount'] = slot.get('committed', 0.0)
+            order['matched_line_count'] = slot.get('lines', 0)
+        return orders
+
+    order_ids = set()
+    if bills:
+        order_ids = _find_orders_via_invoices(odoo, bills, 'purchase.order')
 
     return _fetch_orders_by_ids(odoo, 'purchase.order', order_ids)
 
@@ -616,13 +840,16 @@ def get_job_financials(odoo, account_id):
     )
     net_invoiced = invoice_total - credit_note_total
 
+    posted_bills = [
+        m for m in bills if m.get('state') == 'posted'
+    ]
     bill_total = sum(
-        m.get('amount_total', 0) or 0
-        for m in bills if m.get('move_type') == 'in_invoice' and m.get('state') == 'posted'
+        m.get('attributed_amount', m.get('amount_total', 0) or 0)
+        for m in posted_bills if m.get('move_type') == 'in_invoice'
     )
     vendor_refund_total = sum(
-        m.get('amount_total', 0) or 0
-        for m in bills if m.get('move_type') == 'in_refund' and m.get('state') == 'posted'
+        m.get('attributed_amount', m.get('amount_total', 0) or 0)
+        for m in posted_bills if m.get('move_type') == 'in_refund'
     )
     net_bills = bill_total - vendor_refund_total
 
@@ -631,7 +858,21 @@ def get_job_financials(odoo, account_id):
     labor_hours = sum(t.get('unit_amount', 0) or 0 for t in timesheets)
     labor_cost = sum(abs(t.get('amount', 0) or 0) for t in timesheets)
 
-    # Totals
+    purchase_orders = get_purchase_orders(odoo, account_id, bills=bills)
+    committed_cost = sum(po.get('committed_amount', 0.0) or 0.0 for po in purchase_orders)
+
+    # If a job has posted bills but produced no PO matches, that's almost
+    # always a configuration regression worth surfacing in the logs.
+    if posted_bills and not purchase_orders:
+        logger.warning(
+            'No purchase orders found for account_id=%s despite %d posted bill(s); '
+            'check that purchase.order.line.analytic_distribution is readable.',
+            account_id, len(posted_bills),
+        )
+
+    # Gross profit & margin track BILLED costs only — what's actually on the
+    # books. Committed PO costs are surfaced separately so the team can see
+    # exposure without distorting realised profitability.
     total_costs = net_bills + labor_cost
     gross_profit = total_contract - total_costs
     margin_pct = (gross_profit / total_contract * 100) if total_contract > 0 else 0
@@ -666,6 +907,7 @@ def get_job_financials(odoo, account_id):
         'labor_hours': labor_hours,
         'labor_cost': labor_cost,
         'total_costs': total_costs,
+        'committed_cost': committed_cost,
         'gross_profit': gross_profit,
         'margin_pct': margin_pct,
         'billed_vs_costs': billed_vs_costs,
@@ -673,11 +915,95 @@ def get_job_financials(odoo, account_id):
         'cost_per_sqft': cost_per_sqft,
         'revenue_per_sqft': revenue_per_sqft,
         'sales_orders': sales_orders,
-        'purchase_orders': get_purchase_orders(odoo, account_id, bills=bills),
+        'purchase_orders': purchase_orders,
         'invoices': invoices,
         'bills': bills,
         'timesheets': timesheets[:100],
         'labor_hours_fmt': format_duration(labor_hours),
+    }
+
+
+def get_billing_summary(odoo, account_id, financials=None):
+    """Compute progress-billing context for a job.
+
+    Reuses get_job_financials so the numbers match the Job Detail page.
+    Pass ``financials`` if the caller already has it to avoid a double
+    fetch.
+
+    Returns:
+        contract         Total contract value (sales orders in sale/done state).
+        billed           Net invoiced (posted invoices minus posted credit notes).
+        paid             Sum of (amount_total - amount_residual) across posted
+                         customer invoices — the portion already cleared.
+        outstanding      billed - paid — the AR balance on this job.
+        remaining        contract - billed — the amount still left to invoice.
+        progress_bill_count  Count of posted customer invoices for this job.
+        customer_id / customer_name  Taken from the first sales order and
+                         falling back to the first invoice. Used to pre-fill
+                         the Create Progress Bill form.
+        analytic_id / analytic_name / analytic_code
+                         The job itself, so views that receive only the
+                         summary can still show "Contract on <Job Name>".
+    """
+    if financials is None:
+        financials = get_job_financials(odoo, account_id)
+
+    contract = financials.get('total_contract', 0) or 0
+    billed = financials.get('net_invoiced', 0) or 0
+
+    posted_out_invoices = [
+        m for m in financials.get('invoices', [])
+        if m.get('move_type') == 'out_invoice' and m.get('state') == 'posted'
+    ]
+    paid = sum(
+        (m.get('amount_total', 0) or 0) - (m.get('amount_residual', 0) or 0)
+        for m in posted_out_invoices
+    )
+
+    customer_id = None
+    customer_name = ''
+    for so in financials.get('sales_orders', []):
+        pid = so.get('partner_id')
+        if pid:
+            customer_id = pid[0] if isinstance(pid, (list, tuple)) else pid
+            customer_name = pid[1] if isinstance(pid, (list, tuple)) else ''
+            break
+    if not customer_id:
+        for inv in posted_out_invoices:
+            pid = inv.get('partner_id')
+            if pid:
+                customer_id = pid[0] if isinstance(pid, (list, tuple)) else pid
+                customer_name = pid[1] if isinstance(pid, (list, tuple)) else ''
+                break
+
+    # Fetch the analytic account so views can show "<code> <name>" without
+    # an extra round trip.
+    analytic_name = ''
+    analytic_code = ''
+    try:
+        acct = odoo.search_read(
+            'account.analytic.account',
+            [('id', '=', account_id)],
+            fields=['id', 'name', 'code'],
+        )
+        if acct:
+            analytic_name = acct[0].get('name') or ''
+            analytic_code = acct[0].get('code') or ''
+    except Exception:
+        pass
+
+    return {
+        'contract': contract,
+        'billed': billed,
+        'paid': paid,
+        'outstanding': billed - paid,
+        'remaining': contract - billed,
+        'progress_bill_count': len(posted_out_invoices),
+        'customer_id': customer_id,
+        'customer_name': customer_name,
+        'analytic_id': account_id,
+        'analytic_name': analytic_name,
+        'analytic_code': analytic_code,
     }
 
 
@@ -722,11 +1048,13 @@ def get_job_detail(odoo, account_id):
 
     # Computed financials from source data
     financials = get_job_financials(odoo, account_id)
+    billing = get_billing_summary(odoo, account_id, financials=financials)
 
     return {
         'account': account,
         'sections': rendered_sections,
         'financials': financials,
+        'billing': billing,
         'timesheets': financials['timesheets'],
         'sales_orders': financials['sales_orders'],
         'purchase_orders': financials['purchase_orders'],
@@ -766,107 +1094,122 @@ def _fetch_moves_by_ids(odoo, move_ids):
     return invoices, bills
 
 
-def get_account_invoices(odoo, account_id):
-    """Fetch invoices and bills linked to an analytic account.
+def _fetch_bills_for_analytic(odoo, account_id):
+    """Posted vendor bills/refunds for this analytic account.
 
-    Tries multiple strategies since Odoo versions handle the link differently:
-    1. analytic_distribution JSON field on account.move.line (Odoo 17+)
-    2. analytic_account_id on account.move.line (older Odoo / some configs)
-    3. Via analytic lines that have move_line_id
-
-    Returns (invoices, bills) as two separate lists.
+    Primary path: line-level attribution via _bill_lines_for_analytic so each
+    returned bill dict carries an `attributed_amount` summed from the matching
+    lines' shares. Fallback: legacy analytic_account_id on move lines.
     """
-    # Strategy 1: analytic_distribution ilike search (Odoo 17)
+    attr_by_move = {}
+    move_ids = set()
+
     try:
-        move_lines = odoo.search_read(
-            'account.move.line',
-            [('analytic_distribution', 'ilike', str(account_id))],
+        bill_lines = _bill_lines_for_analytic(odoo, account_id)
+    except Exception as exc:
+        logger.warning(
+            'Bill line lookup via analytic_distribution failed for account_id=%s: %s',
+            account_id, exc,
+        )
+        bill_lines = []
+
+    for line in bill_lines:
+        mv = line.get('move_pk')
+        if not mv:
+            continue
+        move_ids.add(mv)
+        attr_by_move[mv] = attr_by_move.get(mv, 0.0) + line.get('attributed_amount', 0.0)
+
+    if not move_ids:
+        return []
+
+    _, bills = _fetch_moves_by_ids(odoo, move_ids)
+    for bill in bills:
+        bill['attributed_amount'] = attr_by_move.get(bill['id'], bill.get('amount_total', 0.0))
+    return bills
+
+
+def _fetch_invoices_for_analytic(odoo, account_id):
+    """Customer invoices/refunds linked to this analytic account."""
+    move_ids = set()
+
+    candidate_moves = set()
+    try:
+        move_lines = _search_lines_by_analytic(
+            odoo, 'account.move.line', account_id,
             fields=['move_id', 'analytic_distribution'],
-            limit=500,
         )
-
-        move_ids = set()
         for ml in move_lines:
-            dist = ml.get('analytic_distribution')
-            if isinstance(dist, dict) and str(account_id) in dist:
-                move_val = ml.get('move_id')
-                if isinstance(move_val, (list, tuple)):
-                    move_ids.add(move_val[0])
-                elif move_val:
-                    move_ids.add(move_val)
-
-        if move_ids:
-            return _fetch_moves_by_ids(odoo, move_ids)
-    except Exception:
-        pass
-
-    # Strategy 2: analytic_account_id direct field on move lines
-    try:
-        move_lines = odoo.search_read(
-            'account.move.line',
-            [('analytic_account_id', '=', account_id)],
-            fields=['move_id'],
-            limit=500,
+            if _distribution_pct(account_id, ml.get('analytic_distribution')) > 0:
+                mv = ml.get('move_id')
+                mv = mv[0] if isinstance(mv, (list, tuple)) else mv
+                if mv:
+                    candidate_moves.add(mv)
+    except Exception as exc:
+        logger.warning(
+            'Invoice lookup via analytic_distribution failed for account_id=%s: %s',
+            account_id, exc,
         )
 
-        move_ids = set()
-        for ml in move_lines:
-            move_val = ml.get('move_id')
-            if isinstance(move_val, (list, tuple)):
-                move_ids.add(move_val[0])
-            elif move_val:
-                move_ids.add(move_val)
-
-        if move_ids:
-            return _fetch_moves_by_ids(odoo, move_ids)
-    except Exception:
-        pass
-
-    # Strategy 3: via analytic lines → move_line_id → move_id
-    try:
-        # Try move_id first (some Odoo versions have it directly)
-        a_lines = odoo.safe_search_read(
-            'account.analytic.line',
-            [('account_id', '=', account_id)],
-            fields=['move_id', 'move_line_id'],
-            limit=500,
+    if candidate_moves:
+        filtered = odoo.search_read(
+            'account.move',
+            [('id', 'in', list(candidate_moves)),
+             ('move_type', 'in', ['out_invoice', 'out_refund'])],
+            fields=['id'],
         )
+        move_ids.update(m['id'] for m in filtered)
 
-        move_ids = set()
-        move_line_ids = []
-
-        for l in a_lines:
-            # Direct move_id on analytic line
-            mv = l.get('move_id')
-            if isinstance(mv, (list, tuple)) and mv[0]:
-                move_ids.add(mv[0])
-            elif mv and mv is not True:
-                move_ids.add(mv)
-
-            # Or via move_line_id
-            ml = l.get('move_line_id')
-            if isinstance(ml, (list, tuple)) and ml[0]:
-                move_line_ids.append(ml[0])
-            elif ml and ml is not True:
-                move_line_ids.append(ml)
-
-        # Get moves from move_line_ids
-        if move_line_ids and not move_ids:
-            aml_records = odoo.search_read(
-                'account.move.line',
-                [('id', 'in', move_line_ids)],
-                fields=['move_id'],
+    if not move_ids:
+        try:
+            a_lines = odoo.safe_search_read(
+                'account.analytic.line',
+                [('account_id', '=', account_id)],
+                fields=['move_id', 'move_line_id'],
+                limit=500,
             )
-            for r in aml_records:
-                mv = r.get('move_id')
-                if isinstance(mv, (list, tuple)):
-                    move_ids.add(mv[0])
-                elif mv:
+            line_ids = []
+            for line in a_lines:
+                mv = line.get('move_id')
+                mv = mv[0] if isinstance(mv, (list, tuple)) else mv
+                if mv and mv is not True:
                     move_ids.add(mv)
+                ml = line.get('move_line_id')
+                ml = ml[0] if isinstance(ml, (list, tuple)) else ml
+                if ml and ml is not True:
+                    line_ids.append(ml)
+            if line_ids and not move_ids:
+                rows = odoo.search_read(
+                    'account.move.line',
+                    [('id', 'in', line_ids)],
+                    fields=['move_id'],
+                )
+                for r in rows:
+                    mv = r.get('move_id')
+                    mv = mv[0] if isinstance(mv, (list, tuple)) else mv
+                    if mv:
+                        move_ids.add(mv)
+        except Exception as exc:
+            logger.warning(
+                'Invoice fallback via analytic lines failed for account_id=%s: %s',
+                account_id, exc,
+            )
 
-        if move_ids:
-            return _fetch_moves_by_ids(odoo, move_ids)
-    except Exception:
-        pass
+    if not move_ids:
+        return []
 
-    return [], []
+    invoices, _ = _fetch_moves_by_ids(odoo, move_ids)
+    return invoices
+
+
+def get_account_invoices(odoo, account_id):
+    """Fetch customer invoices and vendor bills linked to an analytic account.
+
+    Bills are fetched via percentage-aware line attribution and each bill dict
+    carries an `attributed_amount` key. Invoices keep the broader fallbacks.
+
+    Returns (invoices, bills).
+    """
+    invoices = _fetch_invoices_for_analytic(odoo, account_id)
+    bills = _fetch_bills_for_analytic(odoo, account_id)
+    return invoices, bills

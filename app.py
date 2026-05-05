@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, url_for, session, request
 from config import Config
 from common.odoo_api import OdooClient
 from common.exceptions import OdooConnectionError, OdooAuthenticationError
+from common.list_query import page_url
 
 
 # Paths that don't require authentication
@@ -12,6 +13,7 @@ PUBLIC_PATHS = {'/login', '/logout', '/setup', '/static',
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    app.jinja_env.globals['page_url'] = page_url
 
     # Admin OdooClient - used for employee lookups and API calls
     odoo = OdooClient(

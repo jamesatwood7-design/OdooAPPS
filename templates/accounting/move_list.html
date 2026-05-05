@@ -1,120 +1,92 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state, list_filter_form, sortable_th, paginator %}
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-{% if list_type == 'invoices' %}receipt{% else %}file-earmark-text{% endif %}"></i> {{ title }}</h2>
-    <div>
+<div class="list-toolbar">
+    <span class="list-meta"><strong>{{ totals.count }}</strong> {{ 'invoice' if list_type == 'invoices' else 'bill' }}{{ 's' if totals.count != 1 else '' }} match the current filters</span>
+    <div class="toolbar-group">
         {% if list_type == 'invoices' %}
-        <a href="{{ url_for('accounting.create_invoice') }}" class="btn btn-primary">
-            <i class="bi bi-plus-circle"></i> New Invoice
+        <a href="{{ url_for('accounting.create_invoice') }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Invoice
         </a>
         {% else %}
-        <a href="{{ url_for('accounting.create_bill') }}" class="btn btn-primary">
-            <i class="bi bi-plus-circle"></i> New Bill
+        <a href="{{ url_for('accounting.create_bill') }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Bill
         </a>
         {% endif %}
     </div>
 </div>
 
-<!-- Filters -->
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md-2">
-                <label class="form-label">Status</label>
-                <select name="state" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    <option value="draft" {% if state == 'draft' %}selected{% endif %}>Draft</option>
-                    <option value="posted" {% if state == 'posted' %}selected{% endif %}>Posted</option>
-                    <option value="cancel" {% if state == 'cancel' %}selected{% endif %}>Cancelled</option>
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Payment</label>
-                <select name="payment_state" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    <option value="not_paid" {% if payment_state == 'not_paid' %}selected{% endif %}>Unpaid</option>
-                    <option value="partial" {% if payment_state == 'partial' %}selected{% endif %}>Partial</option>
-                    <option value="paid" {% if payment_state == 'paid' %}selected{% endif %}>Paid</option>
-                    <option value="in_payment" {% if payment_state == 'in_payment' %}selected{% endif %}>In Payment</option>
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">From</label>
-                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}">
-            </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-funnel"></i> Filter</button>
-            </div>
-            <div class="col-md-2 text-end">
-                <strong>{{ moves|length }}</strong> records
-            </div>
-        </form>
+{{ list_filter_form(facets=facets, active=query.filters, sort=query.sort) }}
+
+{% if moves %}
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    {{ sortable_th('Number', 'name', query.sort) }}
+                    {{ sortable_th(partner_label, 'partner', query.sort) }}
+                    {{ sortable_th('Date', 'date', query.sort) }}
+                    <th>Source</th>
+                    {{ sortable_th('Total', 'amount', query.sort, classes='text-end') }}
+                    {{ sortable_th('Due', 'residual', query.sort, classes='text-end') }}
+                    {{ sortable_th('Status', 'state', query.sort) }}
+                    {{ sortable_th('Payment', 'payment', query.sort) }}
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in moves %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('accounting.view_move', move_id=m.id) }}" class="fw-semibold text-decoration-none">
+                            {{ m.name or 'Draft' }}
+                        </a>
+                        {% if m.move_type in ('out_refund', 'in_refund') %}
+                            <span class="badge bg-warning text-dark">Credit Note</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ m.partner_name }}</td>
+                    <td>{{ m.display_date }}</td>
+                    <td><small class="text-muted">{{ m.invoice_origin or m.ref or '-' }}</small></td>
+                    <td class="text-end">${{ '{:,.2f}'.format(m.amount_total or 0) }}</td>
+                    <td class="text-end {% if m.amount_residual %}fw-bold{% endif %}">
+                        {% if m.amount_residual %}${{ '{:,.2f}'.format(m.amount_residual) }}{% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if m.state == 'posted' %}<span class="badge bg-success">Posted</span>
+                        {% elif m.state == 'draft' %}<span class="badge bg-secondary">Draft</span>
+                        {% elif m.state == 'cancel' %}<span class="badge bg-dark">Cancelled</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if m.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
+                        {% elif m.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
+                        {% elif m.payment_state == 'not_paid' %}<span class="badge bg-danger">Unpaid</span>
+                        {% elif m.payment_state == 'in_payment' %}<span class="badge bg-info">In Payment</span>
+                        {% elif m.payment_state == 'reversed' %}<span class="badge bg-dark">Reversed</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td colspan="4">Totals across <strong>{{ totals.count }}</strong> filtered record{{ 's' if totals.count != 1 else '' }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(totals.sums.amount_total or 0) }}</td>
+                    <td class="text-end">${{ '{:,.2f}'.format(totals.sums.amount_residual or 0) }}</td>
+                    <td colspan="2"></td>
+                </tr>
+            </tfoot>
+        </table>
     </div>
 </div>
 
-{% if moves %}
-<div class="card">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0" style="font-size: 0.9rem;">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Number</th>
-                        <th>{% if list_type == 'invoices' %}Customer{% else %}Vendor{% endif %}</th>
-                        <th>Date</th>
-                        <th>Source</th>
-                        <th class="text-end">Total</th>
-                        <th class="text-end">Due</th>
-                        <th>Status</th>
-                        <th>Payment</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for m in moves %}
-                    <tr>
-                        <td>
-                            <a href="{{ url_for('accounting.view_move', move_id=m.id) }}" class="fw-semibold text-decoration-none">
-                                {{ m.name or 'Draft' }}
-                            </a>
-                            {% if m.move_type in ('out_refund', 'in_refund') %}
-                                <span class="badge bg-warning text-dark">Credit Note</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ m.partner_name }}</td>
-                        <td>{{ m.display_date }}</td>
-                        <td><small class="text-muted">{{ m.invoice_origin or m.ref or '-' }}</small></td>
-                        <td class="text-end">${{ '{:,.2f}'.format(m.amount_total or 0) }}</td>
-                        <td class="text-end {% if m.amount_residual %}fw-bold{% endif %}">
-                            {% if m.amount_residual %}${{ '{:,.2f}'.format(m.amount_residual) }}{% else %}-{% endif %}
-                        </td>
-                        <td>
-                            {% if m.state == 'posted' %}<span class="badge bg-success">Posted</span>
-                            {% elif m.state == 'draft' %}<span class="badge bg-secondary">Draft</span>
-                            {% elif m.state == 'cancel' %}<span class="badge bg-dark">Cancelled</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if m.payment_state == 'paid' %}<span class="badge bg-success">Paid</span>
-                            {% elif m.payment_state == 'partial' %}<span class="badge bg-warning text-dark">Partial</span>
-                            {% elif m.payment_state == 'not_paid' %}<span class="badge bg-danger">Unpaid</span>
-                            {% elif m.payment_state == 'in_payment' %}<span class="badge bg-info">In Payment</span>
-                            {% elif m.payment_state == 'reversed' %}<span class="badge bg-dark">Reversed</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
+{{ paginator(query.page, query.page_size, totals.count) }}
 {% else %}
-<div class="alert alert-info">No {{ 'invoices' if list_type == 'invoices' else 'bills' }} found matching the filters.</div>
+{{ empty_state('inbox',
+    'No ' + ('invoices' if list_type == 'invoices' else 'bills') + ' found',
+    'Try adjusting the filters above or clearing them to see all records.') }}
 {% endif %}
 {% endblock %}

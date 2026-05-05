@@ -98,6 +98,32 @@ def get_analytic_accounts(odoo):
     )
 
 
+def get_payment_terms(odoo):
+    """Payment terms (Due on Receipt, Net 15, Net 30, …) for the Terms dropdown."""
+    try:
+        return odoo.safe_search_read(
+            'account.payment.term',
+            [('active', '=', True)],
+            fields=['id', 'name'],
+            order='sequence asc, name asc',
+        )
+    except Exception:
+        return []
+
+
+def get_salespersons(odoo):
+    """Internal users assignable as salesperson on a move."""
+    try:
+        return odoo.safe_search_read(
+            'res.users',
+            [('share', '=', False), ('active', '=', True)],
+            fields=['id', 'name'],
+            order='name asc',
+        )
+    except Exception:
+        return []
+
+
 def _build_move_lines(lines, analytic_id=None):
     """Build invoice_line_ids from parsed line data.
 
@@ -109,6 +135,8 @@ def _build_move_lines(lines, analytic_id=None):
             'quantity': line.get('quantity', 1),
             'price_unit': line.get('price_unit', 0),
         }
+        if line.get('discount'):
+            line_vals['discount'] = line['discount']
         if line.get('product_id'):
             line_vals['product_id'] = line['product_id']
         if line.get('name'):
@@ -124,39 +152,398 @@ def _build_move_lines(lines, analytic_id=None):
     return invoice_lines
 
 
-def create_invoice(odoo, partner_id, invoice_date, lines, journal_id=None,
-                   ref=None, analytic_id=None):
+SUBJECT_HEADER = 'Subject:\n'
+TERMS_HEADER = 'Terms & Conditions:\n'
+
+
+def _compose_narration(subject='', customer_notes='', terms=''):
+    """Merge the three free-text fields into the single Odoo narration field.
+
+    Uses explicit section headers so parse_narration() can reverse the
+    operation when pre-filling the edit form.
+    """
+    parts = []
+    subject = (subject or '').strip()
+    customer_notes = (customer_notes or '').strip()
+    terms = (terms or '').strip()
+    if subject:
+        parts.append(SUBJECT_HEADER + subject)
+    if customer_notes:
+        parts.append(customer_notes)
+    if terms:
+        parts.append(TERMS_HEADER + terms)
+    return '\n\n'.join(parts)
+
+
+def parse_narration(narration):
+    """Split a narration string produced by _compose_narration() back into
+    (subject, customer_notes, terms). Unknown chunks all collapse into
+    customer_notes so we don't lose anything the operator typed.
+    """
+    subject = ''
+    customer_notes_parts = []
+    terms = ''
+    if not narration:
+        return subject, '', terms
+    for chunk in [c.strip() for c in narration.split('\n\n') if c.strip()]:
+        if chunk.startswith(SUBJECT_HEADER):
+            subject = chunk[len(SUBJECT_HEADER):].strip()
+        elif chunk.startswith(TERMS_HEADER):
+            terms = chunk[len(TERMS_HEADER):].strip()
+        else:
+            customer_notes_parts.append(chunk)
+    return subject, '\n\n'.join(customer_notes_parts), terms
+
+
+def _create_move(odoo, move_type, partner_id, invoice_date, lines,
+                 journal_id=None, ref=None, analytic_id=None,
+                 name=None, payment_term_id=None, date_due=None,
+                 user_id=None, subject='', customer_notes='', terms=''):
+    """Create an account.move draft with the extended field set the Zoho-style
+    form collects. Used by create_invoice and create_bill.
+    """
+    narration = _compose_narration(subject, customer_notes, terms)
+    move_vals = {
+        'move_type': move_type,
+        'partner_id': partner_id,
+        'invoice_date': invoice_date,
+        'ref': ref or '',
+        'invoice_line_ids': _build_move_lines(lines, analytic_id),
+    }
+    if journal_id:
+        move_vals['journal_id'] = journal_id
+    if name:
+        move_vals['name'] = name
+    if payment_term_id:
+        move_vals['invoice_payment_term_id'] = payment_term_id
+    if date_due:
+        move_vals['invoice_date_due'] = date_due
+    if user_id:
+        move_vals['user_id'] = user_id
+    if narration:
+        move_vals['narration'] = narration
+
+    return odoo.create('account.move', move_vals)
+
+
+def create_invoice(odoo, partner_id, invoice_date, lines, **kwargs):
     """Create a customer invoice (account.move with move_type='out_invoice').
 
-    When lines have product_id, Odoo auto-fills account, taxes, and description.
+    Accepts the extended keyword set — name, payment_term_id, date_due,
+    user_id, subject, customer_notes, terms — as well as the original
+    journal_id / ref / analytic_id.
     """
-    move_vals = {
-        'move_type': 'out_invoice',
+    return _create_move(odoo, 'out_invoice', partner_id, invoice_date,
+                        lines, **kwargs)
+
+
+def format_progress_summary(contract, previously_billed, previously_paid,
+                            this_invoice):
+    """Render the Progress Billing Summary that will appear on the PDF.
+
+    Lives in the invoice's narration / Customer Notes, which Odoo prints at
+    the bottom of the default invoice template. All figures are computed
+    server-side at the moment the invoice is created, so the customer sees
+    a consistent snapshot.
+    """
+    total_billed = (previously_billed or 0) + (this_invoice or 0)
+    outstanding = total_billed - (previously_paid or 0)
+    remaining = (contract or 0) - total_billed
+
+    def pct(n):
+        if not contract:
+            return '—'
+        return f'{(n / contract * 100):.1f}%'
+
+    def dol(n):
+        return f'${n:,.2f}'
+
+    sep = '—' * 38
+    lines = [
+        'Progress Billing Summary',
+        sep,
+        f'Contract Total:        {dol(contract)}',
+        f'Previously Billed:     {dol(previously_billed)}  ({pct(previously_billed)})',
+        f'Previously Paid:       {dol(previously_paid)}  ({pct(previously_paid)})',
+        f'This Invoice:          {dol(this_invoice)}  ({pct(this_invoice)})',
+        sep,
+        f'Total Billed to Date:  {dol(total_billed)}  ({pct(total_billed)})',
+        f'Outstanding Balance:   {dol(outstanding)}  ({pct(outstanding)})',
+        f'Remaining on Contract: {dol(remaining)}  ({pct(remaining)})',
+    ]
+    return '\n'.join(lines)
+
+
+def get_open_sales_orders(odoo, limit=500):
+    """Confirmed sales orders available for invoicing, used by the Create
+    Invoice form's "From Sales Order" picker.
+
+    Returns orders in 'sale' or 'done' state, ordered newest-first, with
+    enough fields for the picker to show number, customer, job (analytic)
+    name, and total. Each SO is enriched with ``analytic_name`` and
+    ``analytic_code`` so the dropdown can identify a project by name —
+    general contractors with multiple active jobs aren't distinguishable
+    by customer name alone.
+    """
+    try:
+        orders = odoo.search_read(
+            'sale.order',
+            [('state', 'in', ['sale', 'done'])],
+            fields=['id', 'name', 'partner_id', 'date_order',
+                    'amount_total', 'amount_untaxed',
+                    'invoice_status'],
+            order='date_order desc, name desc',
+            limit=limit,
+        )
+    except Exception:
+        return []
+    for so in orders:
+        so['partner_name'] = format_many2one(so.get('partner_id'))
+        so['analytic_id'] = None
+        so['analytic_name'] = ''
+        so['analytic_code'] = ''
+
+    if not orders:
+        return orders
+
+    # --- Batch-fetch SO lines and group by order_id ---
+    order_ids = [o['id'] for o in orders]
+    lines_by_order = {}
+    try:
+        all_lines = odoo.safe_search_read(
+            'sale.order.line',
+            [('order_id', 'in', order_ids)],
+            fields=['order_id', 'analytic_distribution', 'price_subtotal'],
+            limit=5000,  # soft cap; 500 SOs × ~5 lines typical
+        )
+        for ln in all_lines:
+            oid = ln.get('order_id')
+            oid = oid[0] if isinstance(oid, (list, tuple)) else oid
+            if not oid:
+                continue
+            lines_by_order.setdefault(oid, []).append(ln)
+    except Exception:
+        pass
+
+    # --- Resolve dominant analytic per SO (majority-wins on line totals) ---
+    for so in orders:
+        aid = _tally_analytic_distribution(lines_by_order.get(so['id'], []))
+        if aid:
+            so['analytic_id'] = aid
+
+    # --- Header-level fallback for SOs without a line-level analytic ---
+    missing_ids = [o['id'] for o in orders if not o['analytic_id']]
+    if missing_ids:
+        try:
+            headers = odoo.safe_search_read(
+                'sale.order',
+                [('id', 'in', missing_ids)],
+                fields=['id', 'analytic_account_id'],
+            )
+            header_map = {}
+            for h in headers:
+                val = h.get('analytic_account_id')
+                if val:
+                    header_map[h['id']] = (
+                        val[0] if isinstance(val, (list, tuple)) else val
+                    )
+            for so in orders:
+                if not so['analytic_id'] and so['id'] in header_map:
+                    so['analytic_id'] = header_map[so['id']]
+        except Exception:
+            # Field not present on this Odoo install — fine, leave analytic empty.
+            pass
+
+    # --- One batched fetch of every analytic account we touched ---
+    account_ids = sorted({o['analytic_id'] for o in orders if o['analytic_id']})
+    if account_ids:
+        try:
+            accounts = odoo.search_read(
+                'account.analytic.account',
+                [('id', 'in', account_ids)],
+                fields=['id', 'name', 'code'],
+            )
+            acct_map = {a['id']: a for a in accounts}
+            for so in orders:
+                aid = so['analytic_id']
+                if aid and aid in acct_map:
+                    so['analytic_name'] = acct_map[aid].get('name') or ''
+                    so['analytic_code'] = acct_map[aid].get('code') or ''
+        except Exception:
+            pass
+
+    return orders
+
+
+def _coerce_analytic_distribution(raw):
+    """Return a dict form of analytic_distribution regardless of how Odoo
+    serialised it over XML-RPC.
+
+    Observed shapes:
+      - dict: ``{"24": 100.0}`` or compound ``{"24,42": 100.0}``
+      - JSON string: ``'{"24": 100.0}'`` (some older builds)
+      - False/None/empty: no distribution on this line
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _tally_analytic_distribution(lines, amount_field='price_subtotal'):
+    """Majority-wins analytic ID across a list of lines.
+
+    Each line's ``analytic_distribution`` is normalised via
+    ``_coerce_analytic_distribution``, compound keys are split, and
+    percentages are applied to the line's money-value field. The ID whose
+    cumulative dollar value is highest wins.
+    """
+    totals = {}
+    for ln in lines or []:
+        dist = _coerce_analytic_distribution(ln.get('analytic_distribution'))
+        if not dist:
+            continue
+        line_total = ln.get(amount_field, 0) or 0
+        for key, pct in dist.items():
+            for raw in str(key).split(','):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    aid = int(raw)
+                except (ValueError, TypeError):
+                    continue
+                totals[aid] = (
+                    totals.get(aid, 0) + line_total * (pct or 0) / 100.0
+                )
+    if not totals:
+        return None
+    return max(totals, key=totals.get)
+
+
+def get_sale_order_detail(odoo, so_id):
+    """Fetch one sale.order with line-level analytic info, formatted for the
+    JS that pre-fills the Create Invoice form.
+
+    Returns ``None`` if the order isn't found. The analytic account picked
+    is the one tagged on the largest dollar value of lines — the simple
+    majority wins, which matches how progress billing usually works (one
+    job per SO). Also enriches with the analytic account's name/code so
+    the form can display something human before the dropdown rebuilds.
+    """
+    orders = odoo.safe_search_read(
+        'sale.order',
+        [('id', '=', so_id)],
+        fields=['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed',
+                'order_line', 'invoice_status'],
+    )
+    if not orders:
+        return None
+    so = orders[0]
+
+    lines = []
+    if so.get('order_line'):
+        lines = odoo.safe_search_read(
+            'sale.order.line',
+            [('id', 'in', so['order_line'])],
+            fields=['id', 'name', 'product_id', 'product_uom_qty',
+                    'price_unit', 'discount', 'tax_id',
+                    'analytic_distribution', 'price_subtotal'],
+            order='sequence asc, id asc',
+        )
+
+    analytic_id = _tally_analytic_distribution(lines)
+
+    # Fallback: in some Odoo 17 setups the SO itself carries an analytic
+    # account via project_id (CE) or a direct analytic_account_id on the
+    # header. Try both and give up silently if neither field exists.
+    if not analytic_id:
+        try:
+            header = odoo.safe_search_read(
+                'sale.order',
+                [('id', '=', so_id)],
+                fields=['analytic_account_id'],
+            )
+            if header and header[0].get('analytic_account_id'):
+                val = header[0]['analytic_account_id']
+                analytic_id = val[0] if isinstance(val, (list, tuple)) else val
+        except Exception:
+            pass
+
+    analytic_name = ''
+    analytic_code = ''
+    if analytic_id:
+        try:
+            acct = odoo.search_read(
+                'account.analytic.account',
+                [('id', '=', analytic_id)],
+                fields=['id', 'name', 'code'],
+            )
+            if acct:
+                analytic_name = acct[0].get('name') or ''
+                analytic_code = acct[0].get('code') or ''
+        except Exception:
+            pass
+
+    partner = so.get('partner_id')
+    partner_id = partner[0] if isinstance(partner, (list, tuple)) else partner
+
+    return {
+        'id': so['id'],
+        'name': so.get('name'),
         'partner_id': partner_id,
-        'invoice_date': invoice_date,
-        'ref': ref or '',
-        'invoice_line_ids': _build_move_lines(lines, analytic_id),
+        'partner_name': format_many2one(partner),
+        'amount_total': so.get('amount_total', 0) or 0,
+        'amount_untaxed': so.get('amount_untaxed', 0) or 0,
+        'invoice_status': so.get('invoice_status'),
+        'analytic_id': analytic_id,
+        'analytic_name': analytic_name,
+        'analytic_code': analytic_code,
+        'line_count': len(lines),
     }
-    if journal_id:
-        move_vals['journal_id'] = journal_id
-
-    return odoo.create('account.move', move_vals)
 
 
-def create_bill(odoo, partner_id, invoice_date, lines, journal_id=None,
-                ref=None, analytic_id=None):
+def create_progress_bill(odoo, partner_id, analytic_id, milestone, amount,
+                         invoice_date, contract, previously_billed,
+                         previously_paid, extra_notes=''):
+    """Create a draft customer invoice for one progress-billing milestone.
+
+    Produces a single-line invoice ("Progress Billing — <milestone>") for the
+    chosen amount, tagged to the job's analytic account, with the progress
+    summary baked into Customer Notes so it prints on the PDF.
+    """
+    summary = format_progress_summary(
+        contract, previously_billed, previously_paid, amount,
+    )
+    notes_parts = [summary]
+    if extra_notes and extra_notes.strip():
+        notes_parts.append(extra_notes.strip())
+    customer_notes = '\n\n'.join(notes_parts)
+
+    lines = [{
+        'quantity': 1.0,
+        'price_unit': amount,
+        'name': f'Progress Billing — {milestone}',
+    }]
+
+    return create_invoice(
+        odoo, partner_id, invoice_date, lines,
+        analytic_id=analytic_id,
+        customer_notes=customer_notes,
+    )
+
+
+def create_bill(odoo, partner_id, invoice_date, lines, **kwargs):
     """Create a vendor bill (account.move with move_type='in_invoice')."""
-    move_vals = {
-        'move_type': 'in_invoice',
-        'partner_id': partner_id,
-        'invoice_date': invoice_date,
-        'ref': ref or '',
-        'invoice_line_ids': _build_move_lines(lines, analytic_id),
-    }
-    if journal_id:
-        move_vals['journal_id'] = journal_id
-
-    return odoo.create('account.move', move_vals)
+    return _create_move(odoo, 'in_invoice', partner_id, invoice_date,
+                        lines, **kwargs)
 
 
 def create_payment(odoo, partner_id, amount, payment_date, payment_type,
@@ -292,18 +679,24 @@ def create_journal_entry(odoo, journal_id, entry_date, lines, ref=None):
     return odoo.create('account.move', vals)
 
 
+def _move_type_domain(move_type):
+    if move_type == 'invoices':
+        return [('move_type', 'in', ('out_invoice', 'out_refund'))]
+    if move_type == 'bills':
+        return [('move_type', 'in', ('in_invoice', 'in_refund'))]
+    if move_type:
+        return [('move_type', '=', move_type)]
+    return []
+
+
 def get_moves(odoo, move_type=None, state=None, payment_state=None,
               partner_id=None, date_from=None, date_to=None, limit=200):
-    """Get account.move records with filters."""
-    domain = []
+    """Backwards-compatible wrapper around the older single-call signature.
 
-    if move_type == 'invoices':
-        domain.append(('move_type', 'in', ('out_invoice', 'out_refund')))
-    elif move_type == 'bills':
-        domain.append(('move_type', 'in', ('in_invoice', 'in_refund')))
-    elif move_type:
-        domain.append(('move_type', '=', move_type))
-
+    Kept for tests / callers that don't need pagination. New list routes
+    use get_moves_list() plus common.list_query.parse_list_query().
+    """
+    domain = _move_type_domain(move_type)
     if state:
         domain.append(('state', '=', state))
     if payment_state:
@@ -323,21 +716,91 @@ def get_moves(odoo, move_type=None, state=None, payment_state=None,
         order='invoice_date desc, id desc',
         limit=limit,
     )
-
     for m in moves:
         m['partner_name'] = format_many2one(m.get('partner_id'))
         m['display_date'] = m.get('invoice_date') or m.get('date') or ''
-
     return moves
 
 
+def get_moves_list(odoo, move_type, domain=None, order=None,
+                   offset=0, limit=50):
+    """Paginated account.move fetch used by the Invoices / Bills list pages.
+
+    Returns (moves, full_domain). The caller reuses full_domain with
+    compute_list_totals() so the footer reflects the full filtered set.
+    """
+    full_domain = _move_type_domain(move_type) + list(domain or [])
+    moves = odoo.safe_search_read(
+        'account.move', full_domain,
+        fields=['id', 'name', 'move_type', 'partner_id', 'invoice_date',
+                'date', 'amount_total', 'amount_residual', 'state',
+                'payment_state', 'ref', 'invoice_origin'],
+        order=order or 'invoice_date desc, id desc',
+        offset=offset,
+        limit=limit,
+    )
+    for m in moves:
+        m['partner_name'] = format_many2one(m.get('partner_id'))
+        m['display_date'] = m.get('invoice_date') or m.get('date') or ''
+    return moves, full_domain
+
+
 def get_move_attachments(odoo, move_id):
-    """Get all attachments for a transaction."""
+    """Return ir.attachment records for a move, annotated with display helpers
+    and a ``is_main`` flag that identifies the PDF Odoo will send to the
+    customer (account.move.message_main_attachment_id).
+
+    Collects from two places, deduped by id:
+      1. Attachments pointing at this move directly
+         (res_model='account.move', res_id=<move_id>).
+      2. Attachments on chatter messages for this move — these can sit
+         under res_model='mail.compose.message' for certain send flows,
+         so they'd be invisible otherwise.
+    """
+    attachment_ids = set()
+
+    try:
+        direct_ids = odoo.search(
+            'ir.attachment',
+            [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
+        )
+        attachment_ids.update(direct_ids)
+    except Exception:
+        pass
+
+    try:
+        messages = odoo.search_read(
+            'mail.message',
+            [('model', '=', 'account.move'), ('res_id', '=', move_id)],
+            fields=['attachment_ids'],
+        )
+        for msg in messages:
+            for aid in msg.get('attachment_ids') or []:
+                attachment_ids.add(aid)
+    except Exception:
+        pass
+
+    main_id = None
+    try:
+        rows = odoo.search_read(
+            'account.move', [('id', '=', move_id)],
+            fields=['message_main_attachment_id'],
+        )
+        if rows:
+            main = rows[0].get('message_main_attachment_id')
+            if isinstance(main, (list, tuple)) and main:
+                main_id = main[0]
+                attachment_ids.add(main_id)
+    except Exception:
+        pass
+
+    if not attachment_ids:
+        return []
+
     attachments = odoo.search_read(
         'ir.attachment',
-        [('res_model', '=', 'account.move'), ('res_id', '=', move_id)],
-        fields=['id', 'name', 'mimetype', 'file_size', 'create_date', 'type',
-                'datas'],
+        [('id', 'in', list(attachment_ids))],
+        fields=['id', 'name', 'mimetype', 'file_size', 'create_date', 'type'],
         order='create_date desc',
     )
 
@@ -350,10 +813,33 @@ def get_move_attachments(odoo, move_id):
         else:
             a['size_display'] = f'{size} B'
 
-        a['is_pdf'] = 'pdf' in (a.get('mimetype') or '').lower()
-        a['is_image'] = (a.get('mimetype') or '').startswith('image/')
+        mimetype = (a.get('mimetype') or '').lower()
+        a['is_pdf'] = 'pdf' in mimetype
+        a['is_image'] = mimetype.startswith('image/')
+        a['is_previewable'] = a['is_pdf'] or a['is_image']
+        a['is_main'] = a['id'] == main_id
 
     return attachments
+
+
+def delete_attachment(odoo, attachment_id, move_id):
+    """Delete an ir.attachment, verifying it belongs to the given move.
+
+    Returning whether deletion succeeded. We read first to make sure the
+    attachment really is scoped to account.move.<move_id> so the route
+    can't be abused to delete arbitrary attachments by id.
+    """
+    records = odoo.search_read(
+        'ir.attachment',
+        [('id', '=', attachment_id),
+         ('res_model', '=', 'account.move'),
+         ('res_id', '=', move_id)],
+        fields=['id'],
+    )
+    if not records:
+        return False
+    odoo.unlink('ir.attachment', [attachment_id])
+    return True
 
 
 def upload_attachment(odoo, move_id, filename, file_data_base64, mimetype='application/octet-stream'):
@@ -373,23 +859,74 @@ def post_move(odoo, move_id):
     return odoo.execute_kw('account.move', 'action_post', [[move_id]])
 
 
+def reset_move_to_draft(odoo, move_id):
+    """Reset a posted move back to draft so it can be edited."""
+    return odoo.execute_kw('account.move', 'button_draft', [[move_id]])
+
+
 def get_move(odoo, move_id):
-    """Get a single account.move with its lines."""
+    """Fetch a single account.move with enriched header + line data.
+
+    Returns a dict with:
+      - Header: name, move_type, partner_id/partner_name, date, invoice_date,
+        invoice_date_due, invoice_payment_term_id, user_id, ref,
+        invoice_origin, amount_total, amount_untaxed, amount_tax,
+        amount_residual, state, payment_state, narration.
+      - `invoice_lines`: the product/service lines shown on the printed
+        invoice (subset of move.line_ids where display_type is not a
+        section/header and excluding tax/receivable lines).
+      - `journal_lines`: every account.move.line — the accounting view.
+    """
     moves = odoo.safe_search_read(
         'account.move',
         [('id', '=', move_id)],
         fields=['id', 'name', 'move_type', 'partner_id', 'date',
-                'invoice_date', 'amount_total', 'amount_residual',
-                'state', 'payment_state', 'ref'],
+                'invoice_date', 'invoice_date_due',
+                'invoice_payment_term_id', 'user_id',
+                'amount_total', 'amount_untaxed', 'amount_tax',
+                'amount_residual', 'state', 'payment_state',
+                'ref', 'invoice_origin', 'narration',
+                'invoice_line_ids'],
     )
     if not moves:
         return None
 
     move = moves[0]
     move['partner_name'] = format_many2one(move.get('partner_id'))
+    move['payment_term_name'] = format_many2one(move.get('invoice_payment_term_id'))
+    move['salesperson_name'] = format_many2one(move.get('user_id'))
 
-    # Get lines
-    move['lines'] = odoo.safe_search_read(
+    # Invoice-style lines: exclude tax lines, receivable/payable lines, and
+    # section/note display lines.
+    invoice_lines = []
+    line_ids = move.get('invoice_line_ids') or []
+    if line_ids:
+        invoice_lines = odoo.safe_search_read(
+            'account.move.line',
+            [('id', 'in', line_ids)],
+            fields=['id', 'name', 'product_id', 'quantity', 'price_unit',
+                    'discount', 'tax_ids', 'price_subtotal', 'price_total',
+                    'account_id', 'analytic_distribution', 'display_type'],
+            order='sequence asc, id asc',
+        )
+        for line in invoice_lines:
+            line['product_name'] = format_many2one(line.get('product_id'))
+            line['account_name'] = format_many2one(line.get('account_id'))
+            line['tax_label'] = ''
+            if line.get('tax_ids'):
+                try:
+                    taxes = odoo.safe_search_read(
+                        'account.tax',
+                        [('id', 'in', line['tax_ids'])],
+                        fields=['name'],
+                    )
+                    line['tax_label'] = ', '.join(t['name'] for t in taxes)
+                except Exception:
+                    pass
+    move['invoice_lines'] = invoice_lines
+
+    # Full accounting detail for the collapsible Journal Items view.
+    move['journal_lines'] = odoo.safe_search_read(
         'account.move.line',
         [('move_id', '=', move_id)],
         fields=['id', 'name', 'account_id', 'debit', 'credit',
@@ -398,6 +935,43 @@ def get_move(odoo, move_id):
     )
 
     return move
+
+
+def update_move(odoo, move_id, partner_id, invoice_date, lines, **kwargs):
+    """Update an existing draft move. Replaces invoice_line_ids wholesale.
+
+    Same keyword set as create_invoice / create_bill (name, ref, analytic_id,
+    payment_term_id, date_due, user_id, subject, customer_notes, terms).
+    Odoo's action_post refuses to edit non-draft moves, so callers should
+    ensure state=='draft' before calling.
+    """
+    subject = kwargs.get('subject', '')
+    customer_notes = kwargs.get('customer_notes', '')
+    terms = kwargs.get('terms', '')
+    narration = _compose_narration(subject, customer_notes, terms)
+
+    line_commands = [(5, 0, 0)] + _build_move_lines(
+        lines, kwargs.get('analytic_id'),
+    )
+
+    vals = {
+        'partner_id': partner_id,
+        'invoice_date': invoice_date,
+        'ref': kwargs.get('ref') or '',
+        'invoice_line_ids': line_commands,
+    }
+    if kwargs.get('name') is not None:
+        vals['name'] = kwargs['name']
+    if kwargs.get('payment_term_id'):
+        vals['invoice_payment_term_id'] = kwargs['payment_term_id']
+    if kwargs.get('date_due'):
+        vals['invoice_date_due'] = kwargs['date_due']
+    if kwargs.get('user_id'):
+        vals['user_id'] = kwargs['user_id']
+    if narration:
+        vals['narration'] = narration
+
+    return odoo.write('account.move', [move_id], vals)
 
 
 # ---------------------------------------------------------------------------
