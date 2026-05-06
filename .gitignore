@@ -34,3 +34,7 @@ instance/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Migration state and logs
+migration/state/
+logs/migration-*
