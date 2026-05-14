@@ -38,3 +38,6 @@ htmlcov/
 # Migration state and logs
 migration/state/
 logs/migration-*
+
+# Generated Zoho-import XLSX files
+exports/

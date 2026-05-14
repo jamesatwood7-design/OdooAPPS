@@ -1,5 +1,6 @@
 """CLI entrypoint: python -m migration ..."""
 import argparse
+import datetime as _dt
 import os
 import sys
 
@@ -9,6 +10,7 @@ from migration.id_map import IdMap
 from migration.logging_setup import setup_logging
 from migration.zoho_client import ZohoBooksClient
 from migration import orchestrator
+from migration.export import runner as export_runner
 
 
 def _build_clients(dry_run):
@@ -92,6 +94,32 @@ def cmd_status(args):
     return 0
 
 
+def cmd_export(args):
+    """Export Odoo data to Zoho Books-importable XLSX files.
+
+    Does not call Zoho at all — pure read-from-Odoo, write-to-disk.
+    """
+    logger = setup_logging(_log_dir(), verbose=args.verbose)
+    odoo = OdooClient(Config.ODOO_URL, Config.ODOO_DB,
+                      Config.ODOO_USERNAME, Config.ODOO_PASSWORD)
+    odoo.authenticate()
+    out_dir = args.out or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'exports', _dt.date.today().isoformat(),
+    )
+    phases = [p.strip() for p in args.phase.split(',')] if args.phase else ['all']
+    summary = export_runner.run(
+        odoo, out_dir, args.chunk_size, logger, phases=phases,
+    )
+    logger.info('=== export summary ===')
+    logger.info('  output: %s', out_dir)
+    for name, info in summary.items():
+        logger.info('  %s: %s', name, info)
+    logger.info('See %s for upload instructions.',
+                os.path.join(out_dir, 'IMPORT_GUIDE.md'))
+    return 0
+
+
 def cmd_failed(args):
     id_map = IdMap(_id_map_path())
     rows = id_map.iter_failed(args.model)
@@ -119,6 +147,23 @@ def main(argv=None):
     run_p.add_argument('--zoho-user-id', default='',
                        help='Zoho user id to attribute time entries to')
     run_p.set_defaults(func=cmd_run)
+
+    export_phase_names = [p[0] for p in export_runner.PHASES]
+    export_p = sub.add_parser(
+        'export',
+        help='Export Odoo data to Zoho Books-importable XLSX files '
+             '(no Zoho API calls)',
+    )
+    export_p.add_argument('--out', default='',
+                          help='Output directory (default: exports/<today>)')
+    export_p.add_argument('--chunk-size', type=int, default=5000,
+                          help='Max rows per XLSX file (default: 5000, '
+                               'Zoho Books CSV import cap)')
+    export_p.add_argument('--phase', default='all',
+                          help=f"Comma-separated phases or 'all'. "
+                               f"Available: {','.join(export_phase_names)}")
+    export_p.add_argument('-v', '--verbose', action='store_true')
+    export_p.set_defaults(func=cmd_export)
 
     status_p = sub.add_parser('status', help='Show id_map counts')
     status_p.set_defaults(func=cmd_status)

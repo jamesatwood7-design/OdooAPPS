@@ -1,0 +1,23 @@
+"""Excel/CSV export of Odoo data in Zoho Books importable format.
+
+This subpackage is an alternative to the API-based `migration.phases` —
+instead of POSTing to Zoho Books over HTTP, it writes XLSX files that the
+user uploads via Zoho's Settings → Imports UI. No Zoho credentials needed.
+
+Output layout (rooted at `--out`):
+    01_chart_of_accounts.xlsx
+    02_customers.xlsx
+    03_vendors.xlsx
+    04_projects.xlsx
+    05_manual_journals_001.xlsx ... 005.xlsx   (split at chunk size)
+    06_invoices_001.xlsx ...
+    07_credit_notes_001.xlsx ...
+    08_bills_001.xlsx ...
+    09_vendor_credits_001.xlsx ...
+    10_customer_payments_001.xlsx ...
+    11_vendor_payments_001.xlsx ...
+    12_time_entries_001.xlsx ...
+    IMPORT_GUIDE.md
+
+Each exporter is `export_<entity>(odoo, out_dir, chunk_size, logger) -> dict`.
+"""
