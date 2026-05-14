@@ -20,7 +20,10 @@ def migrate(odoo, zoho, id_map, dry_run, logger):
     entries can attach to it.
     """
     counts = {'created': 0, 'skipped': 0, 'failed': 0}
-    for rec in paginate(odoo, MODEL, [('active', '=', True)], FIELDS):
+    # Include archived analytic accounts so historical analytic.line entries
+    # referencing them still have a Zoho project to attach to.
+    domain = [('active', 'in', [True, False])]
+    for rec in paginate(odoo, MODEL, domain, FIELDS):
         odoo_id = rec['id']
         existing = id_map.get_zoho_id(MODEL, odoo_id)
         if existing:

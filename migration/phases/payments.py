@@ -1,4 +1,8 @@
+import logging
+
 from migration import mappers
+from migration.mappers import _odoo_m2o_id
+from migration.logging_setup import log_record
 from migration.phases._common import (
     paginate, extract_zoho_id, record_success, record_skip, record_failure,
 )
@@ -14,6 +18,7 @@ FIELDS = ['id', 'name', 'partner_id', 'partner_type', 'payment_type',
 def migrate(odoo, zoho, id_map, dry_run, logger):
     counts = {'created': 0, 'skipped': 0, 'failed': 0}
     domain = [('state', 'in', ['posted', 'paid', 'in_process', 'reconciled'])]
+    self_pid = id_map.get_self_partner_id()
     for rec in paginate(odoo, MODEL, domain, FIELDS):
         odoo_id = rec['id']
         ptype = rec.get('payment_type')
@@ -21,6 +26,18 @@ def migrate(odoo, zoho, id_map, dry_run, logger):
         existing = id_map.get_zoho_id(MODEL, odoo_id, variant=variant)
         if existing:
             record_skip(logger, MODEL, odoo_id, existing, variant=variant)
+            counts['skipped'] += 1
+            continue
+        partner_id = _odoo_m2o_id(rec.get('partner_id'))
+        if self_pid and partner_id == self_pid:
+            id_map.put(MODEL, odoo_id, '', '', status='skipped',
+                       variant=variant, error='self_partner_transaction')
+            log_record(
+                logger, logging.INFO,
+                f'skip {MODEL}#{odoo_id} ({ptype}) — references self partner',
+                action='skipped', odoo_model=MODEL, odoo_id=odoo_id,
+                variant=variant, error='self_partner_transaction',
+            )
             counts['skipped'] += 1
             continue
         try:
@@ -32,7 +49,9 @@ def migrate(odoo, zoho, id_map, dry_run, logger):
                     )
                     if zid:
                         invoice_zoho_ids.append(zid)
-                body = mappers.map_customer_payment(rec, id_map, invoice_zoho_ids)
+                body = mappers.map_customer_payment(
+                    rec, id_map, invoice_zoho_ids, odoo=odoo,
+                )
                 resp = zoho.create_customer_payment(body)
                 zoho_type = 'customerpayment'
                 zoho_id = extract_zoho_id(resp, 'payment')
@@ -44,7 +63,9 @@ def migrate(odoo, zoho, id_map, dry_run, logger):
                     )
                     if zid:
                         bill_zoho_ids.append(zid)
-                body = mappers.map_vendor_payment(rec, id_map, bill_zoho_ids)
+                body = mappers.map_vendor_payment(
+                    rec, id_map, bill_zoho_ids, odoo=odoo,
+                )
                 resp = zoho.create_vendor_payment(body)
                 zoho_type = 'vendorpayment'
                 zoho_id = extract_zoho_id(resp, 'vendor_payment')

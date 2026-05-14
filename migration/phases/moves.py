@@ -7,7 +7,11 @@ move_type values:
     in_refund    -> Zoho /vendorcredits
     entry        -> Zoho /journals (manual journal)
 """
+import logging
+
 from migration import mappers
+from migration.mappers import _odoo_m2o_id
+from migration.logging_setup import log_record
 from migration.phases._common import (
     paginate, extract_zoho_id, record_success, record_skip, record_failure,
 )
@@ -40,6 +44,7 @@ def migrate(odoo, zoho, id_map, dry_run, logger, move_types=None):
                       'entry')
     domain = [('move_type', 'in', list(move_types)),
               ('state', '=', 'posted')]
+    self_pid = id_map.get_self_partner_id()
     for rec in paginate(odoo, MODEL, domain, MOVE_FIELDS, page_size=100):
         odoo_id = rec['id']
         move_type = rec.get('move_type')
@@ -48,22 +53,34 @@ def migrate(odoo, zoho, id_map, dry_run, logger, move_types=None):
             record_skip(logger, MODEL, odoo_id, existing, variant=move_type)
             counts['skipped'] += 1
             continue
+        partner_id = _odoo_m2o_id(rec.get('partner_id'))
+        if self_pid and partner_id == self_pid and move_type != 'entry':
+            id_map.put(MODEL, odoo_id, '', '', status='skipped',
+                       variant=move_type or '', error='self_partner_transaction')
+            log_record(
+                logger, logging.INFO,
+                f'skip {MODEL}#{odoo_id} ({move_type}) — references self partner',
+                action='skipped', odoo_model=MODEL, odoo_id=odoo_id,
+                variant=move_type or '', error='self_partner_transaction',
+            )
+            counts['skipped'] += 1
+            continue
         try:
             lines = _read_lines(odoo, rec.get('line_ids') or [])
             if move_type == 'out_invoice':
-                body = mappers.map_invoice(rec, lines, id_map)
+                body = mappers.map_invoice(rec, lines, id_map, odoo=odoo)
                 resp = zoho.create_invoice(body)
                 zoho_type, zoho_id = 'invoice', extract_zoho_id(resp, 'invoice')
             elif move_type == 'out_refund':
-                body = mappers.map_invoice(rec, lines, id_map)
+                body = mappers.map_invoice(rec, lines, id_map, odoo=odoo)
                 resp = zoho.create_credit_note(body)
                 zoho_type, zoho_id = 'creditnote', extract_zoho_id(resp, 'creditnote')
             elif move_type == 'in_invoice':
-                body = mappers.map_bill(rec, lines, id_map)
+                body = mappers.map_bill(rec, lines, id_map, odoo=odoo)
                 resp = zoho.create_bill(body)
                 zoho_type, zoho_id = 'bill', extract_zoho_id(resp, 'bill')
             elif move_type == 'in_refund':
-                body = mappers.map_bill(rec, lines, id_map)
+                body = mappers.map_bill(rec, lines, id_map, odoo=odoo)
                 resp = zoho.create_vendor_credit(body)
                 zoho_type, zoho_id = 'vendorcredit', extract_zoho_id(resp, 'vendor_credit')
             elif move_type == 'entry':

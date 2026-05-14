@@ -51,6 +51,46 @@ def _odoo_m2o_name(value):
     return None
 
 
+def resolve_partner_zoho_id(id_map, partner_id, variant, odoo=None):
+    """Look up the Zoho contact id for an Odoo partner.
+
+    Resolution order:
+    1. Exact match on (partner_id, variant).
+    2. If `odoo` is provided and the partner has a parent, the parent's
+       Zoho contact id under the same variant.
+    3. The opposite variant for the same partner (vendor↔customer). Same
+       legal entity often appears on both sides (e.g. a vendor refund
+       lands as inbound).
+
+    Raises KeyError if all three resolutions fail.
+    """
+    if not partner_id:
+        raise KeyError(f'No Zoho {variant} for partner {partner_id}')
+    zid = id_map.get_zoho_id('res.partner', partner_id, variant)
+    if zid:
+        return zid
+    if odoo is not None:
+        try:
+            rec = odoo.read('res.partner', [partner_id], ['parent_id'])
+        except Exception:
+            rec = None
+        if rec:
+            parent_ref = rec[0].get('parent_id')
+            parent_id = _odoo_m2o_id(parent_ref)
+            if parent_id:
+                zid = id_map.get_zoho_id('res.partner', parent_id, variant)
+                if zid:
+                    return zid
+    other = 'vendor' if variant == 'customer' else 'customer'
+    zid = id_map.get_zoho_id('res.partner', partner_id, other)
+    if zid:
+        return zid
+    raise KeyError(
+        f'No Zoho {variant} for partner {partner_id} '
+        f'(no parent or opposite-variant fallback either)'
+    )
+
+
 def map_account(rec):
     """account.account -> Zoho /chartofaccounts body."""
     odoo_type = rec.get('account_type') or ''
@@ -196,12 +236,12 @@ def _line_items_for_doc(line_recs, id_map):
     return items
 
 
-def map_invoice(rec, lines, id_map):
+def map_invoice(rec, lines, id_map, odoo=None):
     """account.move (out_invoice or out_refund) -> /invoices or /creditnotes body."""
     customer_id = _odoo_m2o_id(rec.get('partner_id'))
-    customer_zoho = id_map.get_zoho_id('res.partner', customer_id, 'customer')
-    if not customer_zoho:
-        raise KeyError(f'No Zoho customer for partner {customer_id}')
+    customer_zoho = resolve_partner_zoho_id(
+        id_map, customer_id, 'customer', odoo=odoo
+    )
     body = {
         'customer_id': customer_zoho,
         'invoice_number': rec.get('name') or f"INV/{rec['id']}",
@@ -218,12 +258,12 @@ def map_invoice(rec, lines, id_map):
     return body
 
 
-def map_bill(rec, lines, id_map):
+def map_bill(rec, lines, id_map, odoo=None):
     """account.move (in_invoice or in_refund) -> /bills or /vendorcredits body."""
     vendor_id = _odoo_m2o_id(rec.get('partner_id'))
-    vendor_zoho = id_map.get_zoho_id('res.partner', vendor_id, 'vendor')
-    if not vendor_zoho:
-        raise KeyError(f'No Zoho vendor for partner {vendor_id}')
+    vendor_zoho = resolve_partner_zoho_id(
+        id_map, vendor_id, 'vendor', odoo=odoo
+    )
     body = {
         'vendor_id': vendor_zoho,
         'bill_number': rec.get('ref') or rec.get('name') or f"BILL/{rec['id']}",
@@ -268,12 +308,12 @@ def map_journal(rec, lines, id_map):
     }
 
 
-def map_customer_payment(rec, id_map, invoice_zoho_ids):
+def map_customer_payment(rec, id_map, invoice_zoho_ids, odoo=None):
     """account.payment (inbound) -> /customerpayments body."""
     customer_id = _odoo_m2o_id(rec.get('partner_id'))
-    customer_zoho = id_map.get_zoho_id('res.partner', customer_id, 'customer')
-    if not customer_zoho:
-        raise KeyError(f'No Zoho customer for partner {customer_id}')
+    customer_zoho = resolve_partner_zoho_id(
+        id_map, customer_id, 'customer', odoo=odoo
+    )
     body = {
         'customer_id': customer_zoho,
         'payment_mode': 'banktransfer',
@@ -290,12 +330,12 @@ def map_customer_payment(rec, id_map, invoice_zoho_ids):
     return body
 
 
-def map_vendor_payment(rec, id_map, bill_zoho_ids):
+def map_vendor_payment(rec, id_map, bill_zoho_ids, odoo=None):
     """account.payment (outbound) -> /vendorpayments body."""
     vendor_id = _odoo_m2o_id(rec.get('partner_id'))
-    vendor_zoho = id_map.get_zoho_id('res.partner', vendor_id, 'vendor')
-    if not vendor_zoho:
-        raise KeyError(f'No Zoho vendor for partner {vendor_id}')
+    vendor_zoho = resolve_partner_zoho_id(
+        id_map, vendor_id, 'vendor', odoo=odoo
+    )
     body = {
         'vendor_id': vendor_zoho,
         'payment_mode': 'banktransfer',

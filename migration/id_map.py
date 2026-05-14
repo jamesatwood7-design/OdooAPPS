@@ -87,6 +87,17 @@ class IdMap:
             )
         return list(cur.fetchall())
 
+    def get_self_partner_id(self):
+        """Return the Odoo partner id that contacts.py marked as the
+        company's own self-partner, or None if not set."""
+        row = self._conn.execute(
+            "SELECT odoo_id FROM id_map "
+            "WHERE odoo_model='res.partner' "
+            "  AND variant='self' AND status='skipped' "
+            "LIMIT 1"
+        ).fetchone()
+        return row['odoo_id'] if row else None
+
     def counts(self):
         cur = self._conn.execute(
             "SELECT zoho_type, status, COUNT(*) as c FROM id_map "

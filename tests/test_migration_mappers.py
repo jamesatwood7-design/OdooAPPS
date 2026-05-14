@@ -105,6 +105,72 @@ def test_map_invoice_raises_when_customer_unmapped():
         )
 
 
+def test_resolve_partner_direct_hit():
+    id_map = MagicMock()
+    id_map.get_zoho_id.side_effect = lambda model, oid, variant='': (
+        'CUST-9' if (model, oid, variant) == ('res.partner', 9, 'customer') else None
+    )
+    assert mappers.resolve_partner_zoho_id(id_map, 9, 'customer') == 'CUST-9'
+
+
+def test_resolve_partner_falls_back_to_parent_when_odoo_available():
+    id_map = MagicMock()
+    id_map.get_zoho_id.side_effect = lambda model, oid, variant='': (
+        'CUST-99' if (model, oid, variant) == ('res.partner', 99, 'customer') else None
+    )
+    odoo = MagicMock()
+    odoo.read.return_value = [{'parent_id': [99, 'ParentCo']}]
+    # partner 50 has no entry; parent 99 does
+    assert (
+        mappers.resolve_partner_zoho_id(id_map, 50, 'customer', odoo=odoo)
+        == 'CUST-99'
+    )
+
+
+def test_resolve_partner_falls_back_to_opposite_variant():
+    id_map = MagicMock()
+    # Only vendor variant exists for partner 7
+    id_map.get_zoho_id.side_effect = lambda model, oid, variant='': (
+        'VEND-7' if (model, oid, variant) == ('res.partner', 7, 'vendor') else None
+    )
+    # Looking up as customer should fall back to the vendor side
+    assert (
+        mappers.resolve_partner_zoho_id(id_map, 7, 'customer')
+        == 'VEND-7'
+    )
+
+
+def test_resolve_partner_raises_with_no_fallbacks():
+    import pytest
+    id_map = MagicMock()
+    id_map.get_zoho_id.return_value = None
+    with pytest.raises(KeyError):
+        mappers.resolve_partner_zoho_id(id_map, 123, 'customer')
+
+
+def test_resolve_partner_parent_lookup_skipped_when_no_odoo():
+    import pytest
+    id_map = MagicMock()
+    id_map.get_zoho_id.return_value = None
+    # odoo=None: skip parent lookup, no opposite variant either -> KeyError
+    with pytest.raises(KeyError):
+        mappers.resolve_partner_zoho_id(id_map, 50, 'customer')
+
+
+def test_map_bill_uses_parent_fallback():
+    id_map = MagicMock()
+    id_map.get_zoho_id.side_effect = lambda model, oid, variant='': (
+        'VEND-PARENT' if (model, oid, variant) == ('res.partner', 200, 'vendor')
+        else None
+    )
+    odoo = MagicMock()
+    odoo.read.return_value = [{'parent_id': [200, 'ParentVendor']}]
+    bill = {'id': 5, 'name': 'BILL/5', 'partner_id': [50, 'Child'],
+            'invoice_date': '2024-01-01'}
+    body = mappers.map_bill(bill, [], id_map, odoo=odoo)
+    assert body['vendor_id'] == 'VEND-PARENT'
+
+
 def test_map_journal_filters_zero_lines():
     id_map = MagicMock()
     id_map.get_zoho_id.return_value = 'acc-1'
